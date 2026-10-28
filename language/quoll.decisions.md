@@ -1,0 +1,62 @@
+**QUOLL-1. Aim the language at a flat cost of change with the least reading, to be checked on a series of changes.**
+*Stated by* [goal] and [measure].
+*Because* the yardstick of a language for systems that keep changing is a rate: guidance on quality lowers erosion's starting level and leaves its rate unchanged, as SlopCodeBench finds, so a goal judged on one generation cannot tell the language from a better template, while its cost across a series of changes can.
+*Because* reading belongs in the [goal] as its constraint: least reading alone is best met by reading nothing, as vibe-coding does, and a flat cost alone by reading everything, so the pair names the trade the language makes.
+*Because* a source erodes as code does and costs effort of its own to keep, so one that stays clean while its code erodes has failed, and so has one that drains the effort while its code stays clean.
+*Accepting* that nothing has shown the [goal] met yet, the [measure] waiting for its run; that cost is a composite whose weighting waits for a plan of benchmarks; that flat is judged against a change's size, which is estimated rather than counted; that erosion's measures, found for code, need counterparts of their own for a source; and that the language may lose a comparison on one generation without missing its [goal].
+*Rejected* locality as the [goal], a change touching only the [model.module]s that own its concern, since it is the language's means, counted in [model.module]s the language itself draws, so that a [model.package] drawn coarse looks local while each change costs more; it stays in the [measure]; goals ranked equal, a flat cost, least reading, one text for people and agents, simplicity, any [target] and regeneration among them, a list that settles no trade-off; a goal with no measure, which no series of changes could check; and formalising requirements as such, proof and verification, mechanical semantics, a [target] flowing back into its source, and the quality of a single generation, each outside what the [goal] asks.
+
+**QUOLL-2. Set the language's [reach] at any system designed over a long series of changes whose [target]s agents generate, software first, the core naming no domain.**
+*Stated by* [purpose], [reach] and [target].
+*Because* the language's first sources are not all software: a process of design whose [target]s are agents' skills is among them, which a [reach] of software alone holds only by stretching the word without limit.
+*Because* work beyond code, talks and decks among it, is already designed with logs of [model.decision]s, so a [reach] beyond code is practice rather than speculation.
+*Because* a core naming no domain costs nothing a framework would not say anyway, kinds of contract, releases and tests among it, so a domain's notions, software's too, come in a framework of their own.
+*Because* the [goal] pays, and the [measure] has something to measure, over a long series of changes, while a design that barely changes gains little from the structure, though nothing keeps it from it.
+*Accepting* that the core says less in its own terms, so software's notions are written as a real framework rather than leaned on as built-in words; and that the [reach] is a hypothesis, tested so far on software and on a process of design alone.
+*Rejected* software with the processes that make and run it, a line that only excludes, the core gaining nothing by it; and any designed artifact with no series of changes, one-shot designs as a talk, a contract or a plan among them, over which the [goal] has nothing to measure and plain design serves well enough.
+
+**QUOLL-3. Have agents write the language, under people's supervision or on their own, and make it for reading, by people above all, engineers and architects fluent in the design of [model.module]s who build software with AI, and by agents.**
+*Stated by* [writers] and [readers].
+*Because* nobody writes a source by hand: agents write it, people supervising them or not, so what the language must serve in people is reading, while a person may still write where they wish.
+*Because* the language's value is an architecture of the source, which only a reader fluent in the design of [model.module]s can judge, so it assumes that design and teaches none of it.
+*Because* agents and people then read the same text under the same rules, so the language keeps no dialect for either.
+*Accepting* that the language speaks to those who can understand it alone, naming nobody else, since others may find it useful with an agent's help, and who will not is no list it closes.
+*Rejected* people as its expected [writers], with a split between those who write and those who decide without writing, which rested on people writing by hand; a language shaped for agents first, people reading reports alone, while people read the [model.interface]s and [model.decision]s themselves; and the language teaching the design of [model.module]s to readers who lack it, a methodology's work, a structure diluted for teaching losing what the language adds.
+
+**QUOLL-4. Take [model.module]s as the language's [paradigm], every other a style a framework declares over them, in a programming language one level up that looks simple, its statements in natural language and [formal] to an agent.**
+*Stated by* [paradigm], [character] and [formal].
+*Because* the bound a [model.module] sets on a change is the [goal] as structure, and a [model.module] is the closed input an agent works from, as [principles.session fit] has it.
+*Because* the [readers] already think in [model.module]s, their [model.interface]s and what they depend on.
+*Because* every other paradigm reduces to a style over [model.module]s: a concept is a [model.module] that [model.uses] no other's [model.interface]s, a synchronization one that [model.uses] several concepts' [model.interface]s, a connector one whose [model.interface] is the interaction, and a filter one whose [model.interface] is its input and output; so the core names no style, and each is there where it fits.
+*Because* the [readers] build software with AI, so the language reads as programming one level up, higher than the languages they write in yet built as properly.
+*Because* a statement an agent can follow, and a rule one it can check, is as formal as an agent needs, while natural language keeps it what people read, with no mechanical semantics, which lies outside the [goal].
+*Accepting* that behaviour spanning several [model.module]s, as one feature's flow through them, has no unit of its own, living in the [model.body] of the [model.module] containing them or in a [model.module] of its own that [model.uses] their [model.interface]s; and that a style is only as strong as the [model.framework rules] declaring it and the keeping of them.
+*Rejected* objects, a [model.module] extending another and inheriting its [model.item]s, under which a change to an ancestor reaches every descendant and an agent reads the whole chain to know what one says, while implementing [model.interface]s gives subtyping anyway; concepts and synchronizations as the core, which forbid units to depend on one another, need a formal vocabulary of actions, mechanical semantics outside the [goal], and suit interactive applications rather than any system; dataflow as the core, since most systems are not flows; and a graph of fine-grained typed [model.item]s joined by typed links, with no [model.module]s, under which nothing bounds a [model.reference], so nothing bounds a change.
+
+**QUOLL-5. Divide the definition into five parts, each changing for a reason of its own and kept apart by what each [model.uses]: [layout], [grammar], [model], [source] and [principles].**
+*Stated by* [layout alone], [model alone], [grammar on layout], [source on three] and [principles on model].
+*Because* how files lie on disk, how a file's text is written, what a [model.package] means, which writing states which thing of it, and what every [model.package] keeps each change for a reason of their own: storage, the form of writing, the language's terms, how those meet, and review's practice, so that one reason to change moves one part.
+*Because* the first reader of the language built, a program, drew [layout], [grammar] and [model] apart in practice, each changing apart, while what [principles] holds is read by [writers] and reviewers rather than by such a program.
+*Because* the parts hold [model.interface]s and [model.decision]s alone, so no [model.item] of one is hidden from another, and what keeps each reason to change in one part is what each [model.uses], [model] resting on no other part.
+*Because* a change of storage, as a format of the language's own in place of Markdown, then moves [layout], [grammar] and [source] and leaves [model] and [principles] as they stand, the parts most read being the least changed.
+*Because* the [layout.manifest] then lists each part after those it [model.uses], so a reader of the parts in order meets none before what it rests on.
+*Because* no part has a [model.body], nor does the root implement a part's [model.interface], so each part's [model.default interface] is for whatever reads the language, a toolchain first, to implement.
+*Accepting* parts with no [model.body].
+*Rejected* the blocks of the summary the design began from as parts, a map whose blocks mix reasons to change and hold what is not the language's; one [model.module] holding every [model.interface], many secrets in one; and, stated in the definition, how a system is generated, who writes a [model.package] in which roles, the harness agents work in, how tools are installed and how the language's site is made, each changing with practice or tooling rather than with the language, and a doctrine's, a toolchain's or a [model.project]'s to state.
+
+**QUOLL-6. Call the part that joins [model]'s terms to the files they are written in [source].**
+*Stated by* [source on three].
+*Because* it names the side [model] meets, the files and what is wrong in them, and pairs with [layout.source file].
+*Because* it reads as a qualifier of [model]'s terms, as [source.interface] does.
+*Because* it is short, and is no word another part or a [model.build] already gives another thing.
+*Accepting* that the word also names what is maintained, as against what is generated from it, which [model.project] and [model.package] already cover, so that [model] holds no term of it.
+*Rejected* `encoding`, read as a character encoding, its [source.problem]s as charset errors; `representation`, the longest word in the [model.package]; `storage`, which suggests persistence and databases; `mapping`, which every part does; `binding`, a word [model.build] uses for another thing; `reading` and `resolver`, a tool's process rather than what the part states; and `projection`, a word the language's reasons give another thing.
+
+**QUOLL-7. Provide the root's own [model.interface] alone, including no part's, until a [model.package] depends on the definition.**
+*Stated by* [own surface].
+*Because* the language's own statements are for whoever reads or writes in it, so they stand in an [model.interface], while how the definition keeps them is its own detail, in the root's [model.body].
+*Because* no [model.package] depends on the definition yet, and the first, a toolchain implementing the parts, will show which of them it must see.
+*Because* a [grammar.core word] names its term as [source.core word] has it, so no [model.package] written in the language needs the parts on the surface to be read.
+*Accepting* that nothing outside the definition can name its parts' [model.item]s until their surface is designed.
+*Revisit* when a [model.package] first depends on the definition, the parts' surface designed together with [grammar.dependencies].
+*Rejected* the five parts whole in the root's [model.interface], whose [model.item]s would clash against [model.unique names], the parts sharing names, as [layout.package], [model.package] and [source.package] share one, each naming a thing of its own part; [model] alone on the surface, guessed ahead of its first dependent; a facade per part named as the part, which [model.unique names] bars unless it is amended and a name alone made to name either; a facade per part named apart, two names for each part; every statement of the root in its [model.body], though none of them is hidden; and the root's [model.interface] alone, the division among the parts in it too, though that is the definition's own detail.
