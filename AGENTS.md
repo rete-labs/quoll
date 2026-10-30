@@ -10,8 +10,7 @@ Work arrives as GitHub issues on `rete-labs/quoll`. For any issue, and for any c
 
 An issue's label says what it ends with:
 
-- `decide`: a pass with a person, ending in ratified decisions; it writes no package.
-- `write`: a package's source, written from decisions already taken.
+- `write`: one package change, decided and written with a person, ending in its final source and component decisions committed together.
 - `generate`: targets, generated from a package's source, or straight from decisions where none exists yet.
 - `release`: a version tagged, and what it holds published.
 

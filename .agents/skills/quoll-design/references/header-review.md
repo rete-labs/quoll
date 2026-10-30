@@ -5,7 +5,7 @@ You review headers and decisions an architect wrote, fresh, with nothing but the
 ## You check
 
 - **Syntax**: every file follows the definition's [grammar](../../../../language/grammar/grammar.h.md).
-- **Faithful**: everything the inputs ratified is stated, as ratified; nothing is stated that they do not ratify, beyond what consistency forces; each `open:` item says briefly what is decided and that the rest waits, designing nothing.
+- **Faithful**: everything the inputs currently ratify is stated, as ratified; nothing is stated that they do not ratify, beyond what consistency forces; each `open:` item says briefly what is decided and that the rest waits, designing nothing.
 - **The module's line**: each header states what its module's line in the manifest says it provides, and nothing of what it hides.
 - **Consistent**: with the headers it uses and the package's other headers; every reference lands, as the [model](../../../../language/model/model.h.md)'s `reference` and `sight` have it.
 - **The principles**: what the [principles](../../../../language/principles/principles.h.md) ask of a package, `acyclic definitions`, `no restating`, `stated items` and `lifetime` above all; judge each item no entry's *Stated by* names.
