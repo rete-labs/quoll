@@ -1,6 +1,6 @@
 ---
 name: quoll-design
-description: Work a ticket of the Quoll repository with a person, as the orchestrator - take design decisions as axes with options and a lean, record only what the person ratifies, and run the agents that write a package's headers and bodies. Use for any issue labelled decide or write, and for any change to a Quoll package.
+description: Work a ticket of the Quoll repository with a person, as the orchestrator - take design decisions as axes with options and a lean, record only what the person ratifies, and run the agents that write a package's headers and bodies. Use for any issue labelled write, and for any change to a Quoll package.
 ---
 
 # Quoll design
@@ -12,11 +12,10 @@ Read [`AGENTS.md`](../../../AGENTS.md) first: its conventions bind everything he
 ## Taking a ticket
 
 1. Read the issue whole, with `gh issue view <n> --comments`, and every design it links. Restate its scope to yourself: what it asks, and what its requirements are. Where the scope is unclear, ask the person; never infer it from what is missing.
-2. Open its working directory, `.quoll-wip/<issue>-<topic>/`, and, unless it is `decide`, its branch, `<type>/<issue>/<description>`.
+2. Open its working directory, `.quoll-wip/<issue>-<topic>/`, and its branch, `<type>/<issue>/<description>`, from the start.
 3. Read what of the definition the ticket touches, and the package it works on, as it stands. Establish what exists and what is only designed: a decision resting on a module or a file that does not exist yet is a mistake this prevents.
 4. Work it by its label:
-   - `decide`: a pass of decisions, below, writing into no package. It closes once every axis it opened is ratified, with no commit: tell the person, who closes the issue. Its `decisions.md` stays in its working directory for the `write` ticket that records it.
-   - `write`: decide what the ticket leaves open, then write the package by the roles, below. Where the ticket rests on a `decide` ticket, extract that ticket's verdicts from its working `decisions.md`, and ask the person where it is absent.
+   - `write`: decide and write one package change. Take what the ticket leaves open through the deciding pass below, then write its final package by the roles below, reopening a verdict with the person whenever the writing or review tests it. Its working `decisions.md` stays local; its final source and component decisions are committed together.
    - `generate` and `release`: not covered by this skill yet. Say so to the person and stop.
 
 ## Deciding
@@ -73,9 +72,9 @@ The checks are this skill's `scripts/`, each run with `python3 -I` from the repo
 
 Nothing is pushed before the ticket's final review settles: the repository is public, and a push publishes.
 
-1. Commit on the ticket's branch as `AGENTS.md` says, the body ending with `Closes #<issue>`. Each round of fixes after a review is a commit of its own, so that the reviewer sees what changed since its last round as well as the whole.
+1. Commit the package's final source and its component decisions together on the ticket's branch as `AGENTS.md` says, the body ending with `Closes #<issue>`. The working `decisions.md` and any throwaway Quoll stay uncommitted. Each round of fixes after a review is a commit of its own, so that the reviewer sees what changed since its last round as well as the whole.
 2. Write the pull request's body to the working directory's `pr.md`: what changed; which decisions were recorded, by their entries' IDs; the roles run, their rounds, and the agent and model of each; and **what this guidance left unanswered**, each question you had to ask the person or guess. It quotes nothing of the working directory, which is private.
-3. Ask the person for the final review: a fresh reviewer, run by the person, reviews the branch as [`references/ticket-review.md`](references/ticket-review.md) has it, and writes its findings to the working directory's `review.md`. Answer each beneath it, fixed or why not, the fixes in a new commit.
+3. Ask the person for the final review: a fresh reviewer, run by the person, reviews the branch as [`references/ticket-review.md`](references/ticket-review.md) has it, and writes its findings to the working directory's `review.md`. Answer each beneath it, fixed or why not, the fixes in a new commit. A finding that reopens a verdict goes back to the person as an axis; record the amended verdict in the working record and carry it into the final source and its component decisions together.
 4. Once the person says the review is settled, squash the branch's commits into one, its message the first's, amended where the fixes changed what it says, as the last step before the push, and check that `git diff <last reviewed commit>` is empty; then the person pushes the branch and opens the pull request with `pr.md`, or asks you to. The person merges.
 
 If a session ends before the ticket closes, write `handoff.md` in the working directory: where the ticket stands, what is next, and what to read first.

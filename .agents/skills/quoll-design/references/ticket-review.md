@@ -17,7 +17,7 @@ You review the change that closes a ticket, fresh, before it is pushed: the repo
 2. **The ticket**: each of the issue's requirements, one by one, met, partly met, or not; and nothing done that it does not ask.
 3. **The checks**: run each of this skill's scripts over every package the change touches, and judge what they print.
 4. **The language**: every file changed follows the definition, its grammar above all; every reference lands; the definition is linked, never restated.
-5. **Its decisions**: the entries `pr.md` names are well formed, consistent with the items that state them and with each other.
+5. **Its decisions**: the entries `pr.md` names are well formed, consistent with the items that state them and with each other; the final source and its component decisions are committed together, with no working `decisions.md` or throwaway Quoll among them.
 6. **The conventions** of `AGENTS.md`: the branch, the commit messages, no agent's trailer, Markdown unwrapped.
 7. **Its report**: `pr.md` says the roles run, their rounds, the agent and model of each, and what the guidance left unanswered.
 

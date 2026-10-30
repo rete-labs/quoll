@@ -1,10 +1,12 @@
 # Deciding
 
-How the orchestrator takes a design decision with the person, and records it. Everything here lives in the ticket's working file, `.quoll-wip/<issue>-<topic>/decisions.md`, until a `write` ticket records the verdicts into a package.
+How the orchestrator takes a design decision with the person, and records it. Everything here lives in the `write` ticket's working file, `.quoll-wip/<issue>-<topic>/decisions.md`. The record stays local: it is neither a handoff to another ticket nor the ticket's final result.
 
 ## The working file
 
 One file that grows: each axis is one block, from its question to its options and lean to its verdict. The person may edit it too: edit it in place, never rewrite it whole, and keep every paragraph on one line. Chat carries pointers to it and argument about it, never a copy of it.
+
+Only where the person asks, draft throwaway Quoll in the working directory to test a decision. It is never the package's final source and is never committed; the final source and its component decisions are written through the package-writing process and committed together.
 
 It opens with a counter, kept current, as `12 axes: 4 in progress, 5 open, 3 closed.`, and holds four sections, in this order:
 
@@ -57,9 +59,10 @@ The person rules. Record the verdict on its axis, below its lean, keeping everyt
 ```
 
 - An amendment at ratification is recorded beneath it, in the person's words.
+- **A verdict can be reopened and amended with the person** whenever writing or reviewing the final source and its component decisions tests it. Bring what they expose back as an axis, and record the person's amended verdict before carrying it into the package.
 - **A verdict that flips** sweeps the closed axes: walk them for decisions that rested on the old pick, and reopen those that no longer hold. Each amended axis gets a line saying what amended it.
 - A verdict whose reach goes past the ticket, binding other packages or later work, is said to be so when it is recorded.
 
 ## Into a package
 
-A `write` ticket's architect records ratified verdicts into a package's decisions files, as the definition's grammar writes an entry and its principles' `lifetime` keeps one; whether an entry was ever committed, which `lifetime` turns on, `git log -S'<ID>'` tells. How an entry is compacted from its verdict is in [`architect.md`](architect.md).
+The same ticket's architect records the current ratified verdicts into the package's decisions files, as the definition's grammar writes an entry and its principles' `lifetime` keeps one; whether an entry was ever committed, which `lifetime` turns on, `git log -S'<ID>'` tells. How an entry is compacted from its verdict is in [`architect.md`](architect.md). The package's final source and these entries are the committed result, not the working record.
