@@ -6,21 +6,31 @@
 *Accepting* a heading the language must define, `## Modules`, and fixed rules for the version and the edition.
 *Revisit* if the language comes to need tooling that reads [layout.package]s mechanically, such as a public registry of them, since [markdown] is then probably not the best way to write it; and the dependencies' form, when a [layout.package] first has some.
 *Rejected* the top in the [view block], under `.` or under the [layout.package]'s name, a line whose name is no [layout.path], or a [layout.manifest] with no title; a [front] for the facts, YAML and a [layout.path] no editor opens in a click; one [view block] for everything, making `for` and `hides` the language's words; the version and the dependencies in the [layout.build], the design resting on the assembly.
+*Superseded by* GRAM-30.
 *Formerly* the renderer's SYN-1.
+
+**GRAM-30. Write the public [manifest] as structured identity, edition, description and dependency [selector]s, with no duplicate name, [layout.package] version, source locator, public-face list or membership list.**
+*Stated by* [manifest], [package id] and [selector].
+*Because* every fact a tool reads or edits then has one exact structured representation, while a renderer can derive the [layout.package] title and edition link instead of maintaining a second reading face.
+*Because* a Package URL already has an optional version position, so one [selector] carries the canonical identity and requirement without separate identity and version fields, while the final segment supplies the default local name.
+*Because* the three canonical pseudo-version forms preserve semantic-version ordering with no base, a prerelease base or a stable release base, using one UTC timestamp and 12 hexadecimal revision characters across tools; exact [selector]s also admit other prereleases, while generalized major and major.minor partial [selector]s remain stable-only.
+*Because* release authority belongs to the release rather than a self-declared [manifest] version, and source locations and resolved content belong to the [lock], so a hosting move or mirror does not rewrite the [layout.package]'s public identity.
+*Accepting* the full three-form pseudo-version grammar and exact prerelease admission, with no comparator or range grammar added for partial [selector]s; a structured [manifest] with no Markdown title or [lead], dependency-list uniqueness by unversioned [package id] within one major compatibility series, permitting distinct major series of one [package id], and no inline alias field.
+*Rejected* a Markdown [manifest] or front-matter shell, which leaves tool-read facts in presentation markup; a separate [layout.package] name or self-version, which duplicates another authority; a mapping from local names or object entries with separate identity and version, which repeats defaults without adding meaning; source locators in the [manifest], which couple identity to hosting; and a public-face list, which duplicates the root [layout.header]s.
 
 **GRAM-2. Write the [build] as [view]s alone.**
 *Stated by* [build].
-*Because* a [layout.build] states things, a flow and rules, so one syntax writes every [layout.source file].
+*Because* a [layout.build] states things, a flow and rules, so one syntax writes every Markdown design file.
 *Accepting* [view]s in a [layout.source file] that holds assembly rather than design.
 *Revisit* when the build process is worked on.
-*Rejected* headings of its own, which the language would define for one kind of [layout.source file]; Cargo's keys in a [front], YAML alone.
+*Rejected* headings of its own, which the language would define for one kind of [layout.source file]; and assembly keys in a [front].
 *Formerly* the renderer's SYN-2.
 
 **GRAM-3. Open a group of statements once.**
 *Stated by* [opener], [view block], [grouped] and [colon].
 *Because* it says each [opener] once, where the eye lands first, as a caption does, and keeps one [view block] per [view].
-*Because* an [opener] stays a word and a colon, so the three read as syntax rather than as part of a statement's prose, and nothing is learned but where they stand.
-*Because* `ensures` and `requires` are words developers already know, from design by contract; what readers missed was where they are defined, which the [manifest]'s link now gives.
+*Because* an [opener] stays a word and a [colon], so the three read as syntax rather than as part of a statement's prose, and nothing is learned but where they stand.
+*Because* `ensures` and `requires` are words developers already know, from design by contract.
 *Because* an `impl` line shows, in a [layout.body]'s [view block], which [item]s stand under what its [reference] names, with no [view block] or name more for them.
 *Because* what an `impl` line's [reference] names rests on more than its [layout.source file]'s text, so the line is an [opener] wherever it is written as one (GRAM-20).
 *Because* a missed `:` then costs its own line, the group under it standing as written, where taken as an [item] the line would take the whole group as its statement (GRAM-8).
@@ -32,22 +42,22 @@
 **GRAM-4. Mark every [reference] with brackets, and nothing else with them.**
 *Stated by* [reference], [used] and [no definitions].
 *Because* [markdown]'s own forms then mean what they say: a bracketed name is [markdown]'s form of a link waiting for its target, and a code span is code, [literal] text, as engineers already write file names and commands.
-*Because* every bracket is a [reference], so a misspelt one is found, and nothing in [literal] text is ever taken for one.
+*Because* every bracket in Markdown prose is a [reference], so a misspelt one is found, and nothing in [literal] text is ever taken for one.
 *Because* brackets delimit a name with spaces, where a sigil would not know where it ends.
 *Because* a name that is a verb is used as one, as `[foo]s each`, while the name within the brackets stays as defined, so no [reference] needs English's endings to be resolved.
 *Because* a link definition would make [markdown] render each bracketed span of its name as a link.
-*Accepting* a [reference] shown as bracketed text wherever [markdown] is rendered as it stands; a form of [markdown] no [layout.source file] may write, as [no definitions] has it; and endings read as English and checked by nobody.
-*Rejected* backticks for [reference]s and [literal]s alike, told apart by scope, which lets a misspelt [reference] pass as a [literal]; backticks for [reference]s with [literal]s plain, which takes code's look from file names and commands; [literal]s marked by double backticks or a letter, which show as single backticks or a stray letter wherever [markdown] is rendered; a call form, formal punctuation; plurals and possessives alone after the bracket, which bends a sentence around a verb; the inflected form within the brackets, which asks every resolution for English's endings.
+*Accepting* a [reference] shown as bracketed text wherever [markdown] is rendered as it stands; a form of [markdown] no [layout.source file] may write, as [no definitions] has it; endings read as English and checked by nobody; and unbracketed names in structured values whose own [construct] defines them.
+*Rejected* backticks for [reference]s and [literal]s alike, told apart by scope, which lets a misspelt [reference] pass as a [literal]; [literal]s marked by double backticks or a letter, which show as single backticks or a stray letter wherever [markdown] is rendered; a call form, formal punctuation; plurals and possessives alone after the bracket, which bends a sentence around a verb; and the inflected form within the brackets, which asks every resolution for English's endings.
 *Formerly* the renderer's SYN-4.
 
 **GRAM-5. Open each [layout.header], [layout.private header] and [layout.body] with a [lead], a whole paragraph however many lines it runs over.**
 *Stated by* [lead].
 *Because* a [layout.source file]'s opening paragraph is what a reader meets first, in an editor as on a site, and it is [markdown] with [reference]s, as the rest of the [layout.source file] is.
-*Because* a [front] keeps to relations, and a YAML value opening with a bracket would be read as a list.
-*Because* every [layout.body] is then read alike, its [lead] read off its own text wherever the [layout.body] stands (GRAM-20).
+*Because* a [front] keeps to relations, aliases and the module-lead declaration, outside the prose they serve.
+*Because* every [layout.body] is then read alike, its [lead] read off its [own text] wherever the [layout.body] stands (GRAM-20).
 *Because* a [lead] an editor wraps is still the paragraph the language means.
 *Accepting* a paragraph the language places between the [front] and the first [view].
-*Rejected* descriptions in the [layout.manifest] alone, which leaves every [layout.header] undescribed; a description in a [front]; a heading of its own over it; an [item] named as the [layout.source file] it opens, which repeats a name in every [reference] to it; the [layout.body] at the [layout.package]'s top written with no [lead], which its text alone cannot show.
+*Rejected* descriptions in a membership file alone, which leaves every [layout.header] undescribed; a description in a [front]; a heading of its own over it; an [item] named as the [layout.source file] it opens, which repeats a name in every [reference] to it; and the [layout.body] at the [layout.package]'s top written with no [lead], which its text alone cannot show.
 *Formerly* the renderer's SYN-5 and SYN-17.
 
 **GRAM-6. Write every [layout.source file] in [markdown], but its [front], each [view] a [section] over one [view block] of [item] lines.**
@@ -63,6 +73,21 @@
 *Accepting* columns kept aligned on every edit, which agents do readily and a formatter can restore; links not clickable within a [view block]; and a [view block] shown in monospace on a code host.
 *Revisit* when the language takes a format of its own, as it likely will by its v1.0; and for tooling of the [view block]s, highlighting, drawings in text and editor support with tooltips and links, never braces or other formal punctuation.
 *Rejected* CommonMark alone, which reads a table as a paragraph; the language's [construct]s found line by line over the whole text, which reads a heading or a bracket within a fenced block otherwise than every renderer does; a [markdown] list, a bold name and its statement on each line, which reads as a document's prose where engineers read code; columns of text alone, with no headings to navigate; a programming language's syntax, statements quoted within braces, formal punctuation that reads as code with strings in it; YAML or TOML, prose within structured data, the least readable of all; an Illustrations [section] beside the [view]s, which nothing used; an empty [view] written over an empty fenced block, a heading that states nothing.
+*Superseded by* GRAM-31.
+*Formerly* the renderer's SYN-7.
+
+**GRAM-31. Write every Markdown design file as [view]s over [item] lines within [markdown], keeping wholly structured metadata in [toml] instead.**
+*Stated by* [markdown], [construct], [section], [view], [view block], [written] and [no empty view].
+*Because* a Markdown design file then reads as written wherever that flavour is shown, its tables, task boxes and links among it, and the language's [construct]s stand apart from [markdown]'s own forms, each defined beside it.
+*Because* the language extends Markdown already, by its [reference]s, and grows by an [item].
+*Because* [item]s then read as code does, one level above a programming language, in the fenced block engineers like to read: names in a [column] the eye runs down, a statement starting where the eye lands, with no markup on the line, and a long statement one visual unit.
+*Because* headings give the [view block]s what bulk text lacks, a way to navigate, while the [layout.source file] renders in an editor, on a code host and in review tools alike.
+*Because* a [view block] is still written by rule, as formal as any list.
+*Because* a [layout.header] and a [layout.body] then share one outline, so a reader of one knows where to look in the other.
+*Because* a [view] with nothing to hold states nothing, so none is written to keep an outline full.
+*Accepting* [column]s kept aligned on every edit, which agents do readily and a formatter can restore; links not clickable within a [view block]; a [view block] shown in monospace on a code host; and pure structured files outside this Markdown form.
+*Revisit* when the language takes a format of its own, as it likely will by its v1.0; and for tooling of the [view block]s, highlighting, drawings in text and editor support with tooltips and links, never braces or other formal punctuation.
+*Rejected* CommonMark alone, which reads a table as a paragraph; the language's [construct]s found line by line over the whole text, which reads a heading or a bracket within a fenced block otherwise than every renderer does; a [markdown] list, a bold name and its statement on each line, which reads as a document's prose where engineers read code; columns of text alone, with no headings to navigate; a programming language's syntax, statements quoted within braces, formal punctuation that reads as code with strings in it; prose within structured data for design [view]s, the least readable of all; an Illustrations [section] beside the [view]s, which nothing used; and an empty [view] written over an empty fenced block.
 *Formerly* the renderer's SYN-7.
 
 **GRAM-7. Write no [reference] in [literal] text, and let one run over the lines of an [item] or a paragraph.**
@@ -71,7 +96,7 @@
 *Because* a [view block] is fenced but is the language's own, so its brackets stay [reference]s, while another fenced block is another language's text.
 *Because* a [reference] an editor wraps over two lines is still one.
 *Accepting* that a misspelt [reference] within a code span passes as text.
-*Rejected* every bracketed span a [reference], code included, which forbids the language's [layout.source file]s to show their own syntax; an escape, `\[`, for a literal bracket, which every writer must remember in prose and code alike.
+*Rejected* every bracketed span a [reference], code included, which forbids the language's [layout.source file]s to show their own syntax; an escape, `\[`, for a [literal] bracket, which every writer must remember in prose and code alike.
 *Formerly* the renderer's SYN-8.
 
 **GRAM-8. Tell a [view block]'s lines apart by indentation, a group's first line setting where its [item]s start.**
@@ -79,9 +104,9 @@
 *Because* indentation already says which [item]s a group holds, so it says where the group ends as well: one rule, the one [markdown]'s lists and Python's blocks follow.
 *Because* the [item]s outside every group can then stand where they read best, beside the ones they serve.
 *Because* one step more indented then has one meaning however wide a writer makes the step, and a [view block] whose names stand alone over their statements reads as written.
-*Because* a tab has no width the language fixes, so a line opening with one has no indentation to compare.
-*Accepting* that an [item]'s group rests on its indentation alone.
-*Rejected* a group ending only at the next [opener] line or the [view block]'s end, which pushes the [item]s outside every group before the first; an [opener] for those [item]s, a word for what needs none, which would read as one of the others; a blank line ending a group, a meaning a reader cannot see in a long [view]; a step fixed at two spaces, which turns a group indented by four into lines part of no [construct].
+*Because* a tab has no [width] the language fixes, so a line opening with one has no indentation to compare.
+*Accepting* an [item]'s group resting on its indentation alone.
+*Rejected* a group ending only at the next [opener] line or at the [view block]'s end, which pushes the [item]s outside every group before the first; an [opener] for those [item]s, a word which needs none, as one of the others; a blank line ending a group, a meaning a reader cannot see in a long [view]; and a step fixed at two spaces, which turns a group indented by four into lines part of no [construct].
 *Formerly* the renderer's SYN-9.
 
 **GRAM-9. Write a [front] as a YAML mapping outside the [markdown] text, its keys the language's and its names as YAML reads them.**
@@ -94,11 +119,22 @@
 *Because* a name in a [front] is then spelt as it is wherever else it is written, so it is learned once; what it names is the meaning's (GRAM-20).
 *Revisit* when the language takes a format of its own (GRAM-6), which will likely change how a [layout.source file] states its relations; v0.x starts fast with YAML.
 *Rejected* one key alone, which a second key would rewrite; a name as its scalar is written, which hands a quoted name over with its quotes; a name as YAML types it, which loses such a name.
+*Superseded by* GRAM-32.
+*Formerly* the renderer's SYN-15 and SYN-27.
+
+**GRAM-32. Write every Quoll-owned structured file and [front] in [toml], and declare PURL and qualified-name aliases in one `aliases` table.**
+*Stated by* [toml], [front], [workspace manifest], [modules] and [canonical toml].
+*Because* explicit scalar types and a simple table model give tools an exact edit boundary without implicit conversions, anchors or a custom configuration language, while short [manifest]s and aliases remain comfortable to read and write.
+*Because* one structured syntax serves pure [manifest]s, membership, [lock]s and [front] matter, and `+++` keeps that [front] matter distinct from the Markdown it precedes.
+*Because* one alias mapping handles PURL and qualified-name targets where [reference]s are used, with Package URL versus qualified-[reference] syntax telling the target kinds apart; an unversioned target follows ordinary version updates, while a [selector] target distinguishes simultaneously visible versions.
+*Because* the boolean `"module lead" = true` marks the owning [layout.header] where no [layout.body] or default [layout.header] supplies the [lead], without making that [layout.header] a default or moving its [lead] into membership metadata.
+*Accepting* a TOML parser dependency, arrays of tables in generated [lock]s, explicit quoting, two target grammars in one alias table, and one new front-matter boolean whose cardinality is the source join's to check.
+*Rejected* YAML, whose broader grammar and implicit typing need restriction and careful canonicalization; JSON, whose hand-facing forms are more verbose and comment-free; splitting TOML and JSON by file kind, which doubles parsers and serializers; comment-enabled JSON variants, whose implementations vary; separate PURL and qualified-name alias mappings, which add structure without expressive power; and package-global aliases, which turn a local [reference] convenience into global naming policy.
 *Formerly* the renderer's SYN-15 and SYN-27.
 
 **GRAM-10. Write an [entry] as a paragraph, a line to each word, its `*Stated by*` first, naming [item]s alone.**
 *Stated by* [entry] and [stated].
-*Because* an [entry] then references the [item]s that state it, so that a reader finds where it is stated.
+*Because* an [entry] then [reference]s the [item]s that state it, so that a reader finds where it is stated.
 *Because* a line under a word, `*Taken by*` among them, is found by its opening, whatever lines an [entry] holds.
 *Accepting* a line under a word wrapped over two lines, its second taken as what was decided.
 *Formerly* the renderer's SYN-16, in part.
@@ -108,69 +144,69 @@
 *Because* a made-up name reads as one wherever programming is written, so an example is never taken for a [reference] to something real, and none goes stale when the [layout.package] renames what it would have shown.
 *Because* [literal] text holds no [reference] (GRAM-7), so a real name within it escapes every resolution of [reference]s, while a made-up one stays an example wherever it stands.
 *Accepting* four names every example takes.
-*Rejected* real names in examples, which go stale unseen when what they name is renamed; names the language reserves, as RFC 2606 reserves `.example`, which would take four names from every [layout.package], `bar` an English word among them; a real [reference] in place of an example, which shows it as its link, never as it is written.
+*Rejected* real names in examples, which go stale unseen when what they name is renamed; names the language reserves, which would take four names from every [layout.package]; and a real [reference] in place of an example, which shows it as its link, never as it is written.
 
-**GRAM-13. Keep a [view block]'s lines within 100 columns.**
+**GRAM-13. Keep a [view block]'s lines within 100 [column]s.**
 *Stated by* [width].
-*Because* 100 is the line length rustfmt keeps by default, as do the most widely followed Java and Kotlin style guides, so a [view block] reads as the code its readers write.
-*Because* a [view block]'s writer wraps each statement at its column, which no editor's soft wrap keeps, so a [view block] needs a width of its own.
-*Accepting* [view block]s wrapped at two widths, until each is next rewritten.
-*Revisit* when the language lets a [layout.package] set its own width, as a formatter's line length is a repository's own setting.
-*Rejected* 92, one column more than the widest line in the language's first sketch, a number with no reason; 80, which would rewrap nearly every [view block]; no limit, under which a long line wraps to the margin in an editor and scrolls sideways on a page.
+*Because* 100 is the line length common formatters and widely followed style guides keep, so a [view block] reads as the code its readers write.
+*Because* a [view block]'s writer wraps each statement at its [column], which no editor's soft wrap keeps, so a [view block] needs a [width] of its own.
+*Accepting* [view block]s wrapped at two [width]s, until each is next rewritten.
+*Revisit* when the language lets a [layout.package] set its own [width], as a formatter's line length is a repository's own setting.
+*Rejected* 92, one [column] more than the widest line in the language's first sketch, a number with no reason; 80, which would rewrap nearly every [view block]; and no limit, under which a long line wraps to the margin in an editor and scrolls sideways on a page.
 
-**GRAM-14. Start a [view block]'s statements in one column, and take a [construct] written against a writer's rule as the [construct] it reads as.**
+**GRAM-14. Start a [view block]'s statements in one [column], and take a [construct] written against a writer's rule as the [construct] it reads as.**
 *Stated by* [column] and [slips].
-*Because* a breach of a rule [slips] names is a slip in what its writer wrote, where a line part of no [construct] says nothing [grammar] states.
-*Because* one column lets a reader run down a [view block]'s names and its statements apart.
-*Rejected* the column as part of what makes an [item], which turns a statement one space off into lines part of no [construct].
+*Because* a breach of a rule [slips] names is a slip in what its writer wrote, where a line part of no [construct] says nothing this part states.
+*Because* one [column] lets a reader run down a [view block]'s names and its statements apart.
+*Rejected* the [column] as part of what makes an [item], which turns a statement one space off into lines part of no [construct].
 
-**GRAM-15. Head a [section] as the language names it, once, and let every [entry] stand under any heading of a [layout.decisions].**
+**GRAM-15. Head a [section] as the language names it, once, and let every [entry] stand under any heading of an [entry] file.**
 *Stated by* [section] and [written].
 *Because* the [view] kept is the first, which nothing after it changes, and a second would split one [view]'s [item]s over two fenced blocks.
 *Because* a [view]'s [section] then holds its [view block] alone, so no prose, table or second fenced block beside it states what its [item]s do not.
-*Because* a heading in a [layout.decisions] then costs its own line, and leaves every [entry] and [reference] under it as written.
+*Because* a heading in an [entry] file then costs its own line, and leaves every [entry] and [reference] under it as written.
 *Accepting* a line part of no [construct] for each heading a writer groups [entry]s under.
 *Revisit* when a [layout.package]'s [layout.decisions] need grouping.
-*Rejected* every line under such a heading part of no [construct], which loses a whole [layout.decisions]' [entry]s to one heading; a heading grouping [entry]s as a [construct] of its own, which no [layout.decisions] needs, its [entry]s standing in the order taken.
+*Rejected* every line under such a heading part of no [construct], which loses a whole [entry] file's [entry]s to one heading; and a heading grouping [entry]s as a [construct] of its own, which no [entry] file needs, its [entry]s standing in the order taken.
 *Formerly* the renderer's SYN-23.
 
 **GRAM-16. Mark an [item] or an [entry] with free [label]s at the end of its last line, each word running to the next space.**
 *Stated by* [label].
-*Because* it is what code already gives people, as `TODO` in a comment or a label on an issue: a free word costs nothing to learn, and one search finds every [item] it marks.
-*Because* a [label] at the end of what it marks is found in the [layout.source file], where engineers read, while a `#` within a sentence, as an issue's number, stays the text it is.
+*Because* it is what code already gives people, as a task marker in a comment or a [label] on an issue: a free word costs nothing to learn, and one search finds every [item] it marks.
+*Because* a [label] at the end of what it marks is found in the [layout.source file], where engineers read, while a `#` within a sentence stays the text it is.
 *Because* a [label] is then the word its writer wrote, as `#foo-bar` is, whatever its characters.
 *Accepting* that free [label]s drift into a vocabulary of their own, which a team may settle by convention.
-*Rejected* none in the [layout.source file]s, marks on a rendered page alone, while engineers read files; [label]s listed in the [layout.manifest], a mark away from what it marks; any `#` word a [label], wherever it stands, which turns a number in a sentence into one; a word of letters alone, which cuts `#foo-bar` short.
+*Rejected* none in the [layout.source file]s, marks on a rendered page alone, while engineers read files; [label]s listed in a [manifest], a mark away from what it marks; any `#` word a [label], wherever it stands, which turns a number in a sentence into one; and a word of letters alone, which cuts `#foo-bar` short.
 *Formerly* the renderer's SYN-25, in part.
 
-**GRAM-17. Write an ID as a mnemonic of ASCII letters, digits and hyphens, a hyphen and ASCII digits, and take a bare one of its [layout.decisions]' own mnemonic as a [reference] where nothing joins it to what stands beside it.**
+**GRAM-17. Write an ID as a mnemonic of ASCII letters, digits and hyphens, a hyphen and ASCII digits, and take a bare one of its [entry] file's own mnemonic as a [reference] where nothing joins it to what stands beside it.**
 *Stated by* [entry] and [reference].
-*Because* an [entry] citing another of its [layout.decisions] is then checked to cite one that exists, a misspelt ID being a [reference] that lands on nothing rather than text.
-*Because* an ID is distinct enough to need no brackets, its [layout.decisions]' own mnemonic telling it from text of its shape, as `UTF-8`.
-*Because* an ID then holds no space, full stop or asterisk, so where it ends in an [entry]'s first line is never in doubt, and a mnemonic with a segment of its own, as a milestone's in `FOO-B2-12`, is still an ID.
-*Because* an ID whose number opens a longer one, as `FOO-2` opens `FOO-20`, or which ends or opens a longer ID, as in `BAR-FOO-2` or `FOO-2-3`, is never taken out of it, while one followed by `'s` or a full stop still is a [reference].
-*Accepting* that another [layout.decisions]' ID, cited in an [entry], stays text.
-*Rejected* IDs as plain text, under which a citation of one that does not exist goes unseen; IDs in brackets, spending them where no name in scope is meant; a mnemonic of capital letters alone, which is narrower than what writers write; any match of an ID's characters, which takes one out of a longer ID.
+*Because* an [entry] citing another of its [entry] file is then checked to cite one that exists, a misspelt ID being a [reference] that lands on nothing rather than text.
+*Because* an ID is distinct enough to need no brackets, its [entry] file's own mnemonic telling it from text of its shape, as `UTF-8`.
+*Because* an ID then holds no space, full stop or asterisk, so where it ends in an [entry]'s first line is never in doubt, and a mnemonic with a segment of its own is still an ID.
+*Because* an ID whose number opens a longer one, or which ends or opens a longer ID, is never taken out of it, while one followed by `'s` or a full stop still is a [reference].
+*Accepting* that another [entry] file's ID, cited in an [entry], stays text.
+*Rejected* IDs as plain text, under which a citation of one that does not exist goes unseen; IDs in brackets, spending them where no name in scope is meant; a mnemonic of capital letters alone, which is narrower than what writers write; and any match of an ID's characters, which takes one out of a longer ID.
 *Formerly* the renderer's SYN-16 in part, SYN-26 and SYN-28.
 
 **GRAM-19. Name the language's [construct]s as one family, [construct], below its members.**
 *Stated by* [construct].
-*Because* [grammar] uses the word itself, so it defines it, its members listed beside their own [item]s and kept in step as one is added.
+*Because* this part uses the word itself, so it defines it, its members listed beside their own [item]s and kept in step as one is added.
 *Because* a family is then an [item] like any other, a thing that is one of several, as an enum is in a programming language, so the language needs nothing new for it.
 *Because* [written] then makes a line outside every member a fault.
-*Rejected* the word left plain, read by inference; a name for the family declared in the [front] of each [layout.source file] using it, which leaves it undefined for whoever reads that [layout.source file]'s [layout.header]; the family defined by whatever reads the [construct]s, as its own [item] stating it is one of [grammar]'s, a second list kept in step by hand; the members spelt out wherever the family is meant.
+*Rejected* the word left plain, read by inference; a name for the family declared in the [front] of each [layout.source file] using it, which leaves it undefined for whoever reads that [layout.source file]'s [layout.header]; the family defined by whatever reads the [construct]s as its own [item] stating it is one of this part's, a second list kept in step by hand; and the members spelt out wherever the family is meant.
 
-**GRAM-20. Read every [construct] off one [layout.source file]'s own text, apart from what it means; let only a rule for writers rest on the [layout.package].**
+**GRAM-20. Read every [construct] off one [layout.source file]'s [own text], apart from what it means; let only a rule for writers rest on the [layout.package].**
 *Stated by* [own text].
 *Because* whoever writes a [layout.source file], person or agent, relies on how it is written, so it is stated where writers read it, apart from what a [layout.source file] means, which is another thing, read from many [layout.source file]s at once.
 *Because* a [layout.source file]'s form then rests on its text alone, so any tool reads one [layout.source file] by it, and a fault of meaning is found as what it is rather than as a line malformed.
 *Because* a rule for writers asks what a writer, who sees the [layout.package], can keep, while what a [layout.source file] holds stays readable without it.
-*Because* whatever reads for meaning then uses [grammar] and is never used by it, so the two are stated in order.
-*Rejected* how a [layout.source file] is written left to whatever reads it, hidden from those who write; form and meaning in one [layout.header], which whoever needs either must take whole; a [construct] resting on more than one [layout.source file]'s text, as whether a [layout.body] stands at the [layout.package]'s top, which one [layout.source file]'s text cannot show.
+*Because* whatever reads for meaning then uses this part and is never used by it, so the two are stated in order.
+*Rejected* how a [layout.source file] is written left to whatever reads it, hidden from those who write; form and meaning in one [layout.header], which whoever needs either must take whole; and a [construct] resting on more than one [layout.source file]'s text, as whether a [layout.body] stands at the [layout.package]'s top, which one [layout.source file]'s text cannot show.
 
-**GRAM-22. Open each [item] with its name and each [entry] with its ID, the IDs of one [layout.decisions] sharing a mnemonic no other uses.**
+**GRAM-22. Open each [item] with its name and each [entry] with its ID, the IDs of one [entry] file sharing a mnemonic no other uses.**
 *Stated by* [item], [entry] and [unique].
-*Because* a bare ID is then read within its own [layout.decisions] alone, its mnemonic showing which that is (GRAM-17).
+*Because* a bare ID is then read within its own [entry] file alone, its mnemonic showing which that is (GRAM-17).
 *Formerly* the renderer's SYN-16, in part.
 
 **GRAM-25. Write the language's [core word]s bare, as words of text.**
@@ -180,14 +216,14 @@
 *Because* a word of text that reserves no name takes nothing from writers: a [layout.package]'s own `package` stays its own, written as a [reference].
 *Because* an [item]'s defining name, a heading the language names, a [label] and a link's destination each mark a [construct] or a target rather than speak of the language's terms.
 *Because* in the language's own [layout.package] the terms are its own [item]s, which is why [own terms] holds there; what a [core word] names elsewhere, and at which edition, is the meaning's (GRAM-20).
-*Accepting* six words that, written bare in any [layout.package], are the language's terms rather than plain English; and a list [grammar] keeps in step with the definition's terms by hand, as a language's keywords are listed in its lexical grammar.
+*Accepting* six words that, written bare in any [layout.package], are the language's terms rather than plain English; and a list this part keeps in step with the definition's terms by hand, as a language's keywords are listed in its lexical grammar.
 *Revisit* the list as the definition's terms settle.
-*Rejected* the words plain, defined nowhere a reader of the [layout.source file] looks; three words alone, `package`, `module` and `interface`, leaving out types every [layout.source file] speaks of; every term the definition defines, a list [grammar] could keep only as text in step with another's by hand; a [core word] reserving its name, which takes from every [layout.package] a name it may want; any letters after a listed word an inflection, which makes `projection` and `packaging` [core word]s; a [core word] wherever its word stands bare, which makes an [item]'s defining name and a named heading one, and the language's own [layout.package] bracket its own `Modules`.
+*Rejected* the words plain, defined nowhere a reader of the definition looks; three words alone, `package`, `module` and `interface`, leaving out types every [layout.source file] speaks of; every term the definition defines, a list this part could keep only as text in step with another's by hand; a [core word] reserving its name, which takes from every [layout.package] a name it may want; any letters after a listed word an inflection, which makes `projection` and `packaging` [core word]s; and a [core word] wherever its word stands bare, which makes an [item]'s defining name and a named heading one.
 
 **GRAM-26. Keep how [layout.tests] are written open until a [layout.package] has some.**
 *Stated by* [tests].
 *Because* no [layout.package] yet has [layout.tests].
-*Rejected* their form designed now; their form left out of the definition.
+*Rejected* their form designed now; and their form left out of the definition.
 
 **GRAM-28. Give each [item] of a [layout.source file] a name of its own, but under `impl` lines of a [layout.body] whose [reference]s differ.**
 *Stated by* [one name].
@@ -195,3 +231,11 @@
 *Because* a [layout.body] carrying out two [layout.header]s that each hold an [item] of one name holds an [item] for each, each written bare under its own `impl` line; whether two differing [reference]s name different things is the meaning's (GRAM-20).
 *Accepting* that two [item]s of one [layout.body] may share a name, told apart by the `impl` line each stands under.
 *Rejected* two [item]s of one name under `impl` lines with the same [reference], as in two [view]s, which would make two [item]s carry out one.
+
+**GRAM-29. Write the root's full direct-and-transitive resolution as exact [lock] entries, with content hashes and one or more resolved Git sources.**
+*Stated by* [lock].
+*Because* the exact selected [selector], full commit and [layout.package] hash fix what the root checked, while the locator and matched tag or requested committish explain how to find the same source again.
+*Because* release and development entries share one shape apart from the release-only [literal] tag, and mirrors can differ in locator and commit without changing the expected [layout.package] hash.
+*Because* `1220` followed by 64 lowercase hexadecimal digits writes the SHA-256 multihash's algorithm and length around the outer dirhash digest, not a replacement for the specified summary serialization.
+*Accepting* verbose arrays of tables, transitive entries repeated across independent root [lock]s, and no [lock] entry for a workspace-local working tree substituted at head.
+*Rejected* direct entries alone recursively governed by dependency [lock]s, which prevents consumer-level reconciliation; partial [selector]s in a [lock], which leaves the selected graph unfixed; a hash in the public [manifest], which mixes resolution into declaration; and machine-specific [layout.workspace] [layout.path]s in a [lock].

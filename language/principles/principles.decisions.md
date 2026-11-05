@@ -22,7 +22,7 @@
 *Stated by* [no cycle].
 *Because* an edit's reach runs through [model.interface]s alone, as [model.sight] has it, so a cycle that carries change is one among [model.interface]s.
 *Because* a parent lending a private [model.interface] to its parts while its [model.body] rests on theirs is how [model.sight] lets an ancestor bind its subtree, which a cycle read among [model.module]s would forbid.
-*Revisit* if review meets a cycle among [model.module]s that carries change and this misses; and for [model.package]s resting on one another at head within a [model.project].
+*Revisit* if review meets a cycle among [model.module]s that carries change and this misses; and for [model.package]s resting on one another at head within a [model.workspace].
 *Rejected* a cycle read among [model.module]s, each resting on whatever provides an [model.interface] it [model.uses], which forbids a parent that lends inward and composes its parts.
 
 **PRINC-4. Recommend that a [model.module] fit one agent's session, a judgement, never part of what a [model.module] is.**
@@ -50,7 +50,7 @@
 *Accepting* a family read after its members.
 *Rejected* [model.item]s defined in any order, each relation stated wherever convenient, which leaves a reader meeting terms before their definitions and two statements of one relation to keep equal; the rule stated for one part's [model.item]s alone, which every other part would state again.
 
-**PRINC-8. Let no statement but a [model.decision]'s own restate what an [model.item] or the [model.edition] its [model.package] is written in states, referencing the [model.item] or writing in the [model.edition]'s terms, and let a [model.decision] reference the [model.item]s it decided, what holds of a [model.package] being an [model.item]'s to state.**
+**PRINC-8. Let no statement but a [model.decision]'s own restate what an [model.item] or the [model.edition] its [model.package] is written in states, referencing the [model.item] or writing in the [model.edition]'s terms, and let a [model.decision] [model.reference] the [model.item]s it decided, what holds of a [model.package] being an [model.item]'s to state.**
 *Stated by* [no restating].
 *Because* an [model.item] then states what holds, and a [model.decision] which [model.item]s it decided and what no [model.item] holds, so nothing is said twice and nothing drifts.
 *Because* people read the [model.interface]s and the headings of [model.decision]s most, and whatever shows a [model.package] can show a referenced [model.item] on demand, so a [model.decision] read through its heading and the [model.item]s it names needs nothing restated.
