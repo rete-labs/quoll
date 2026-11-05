@@ -1,0 +1,4 @@
+id = "pkg:quoll/rete-labs.ru/quoll/language"
+edition = "0.4.0"
+description = "A language for the source of a system, defined in itself."
+dependencies = []
