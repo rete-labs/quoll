@@ -72,17 +72,30 @@ def check_block(path, heading, block):
                 report(path, n, "an opener left at the start of a statement")
 
 
+def fence_marker(line):
+    match = re.match(r"^\s*(`{3,}|~{3,})", line)
+    return match.group(1) if match else None
+
+
+def is_fence_close(line, marker):
+    return bool(re.fullmatch(rf"\s*{re.escape(marker[0])}{{{len(marker)},}}\s*", line))
+
+
 for path in sorted(root.rglob("*.md")):
     lines = path.read_text(encoding="utf-8").split("\n")
-    heading, in_block, block = None, False, []
+    heading, marker, block = None, None, []
     for no, line in enumerate(lines, 1):
-        if line.startswith("## ") and not in_block:
+        if line.startswith("## ") and marker is None:
             heading = line[3:].strip()
-        if line.startswith("```"):
-            if in_block and block:
-                check_block(path, heading, block)
-            block, in_block = [], not in_block
+        found = fence_marker(line)
+        if marker is None and found is not None:
+            marker, block = found, []
             continue
-        if in_block:
-            block.append((no, line))
+        if marker is not None:
+            if is_fence_close(line, marker):
+                if block:
+                    check_block(path, heading, block)
+                marker, block = None, []
+            else:
+                block.append((no, line))
 print("problems:", bad)

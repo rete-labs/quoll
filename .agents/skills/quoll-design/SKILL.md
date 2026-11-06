@@ -39,7 +39,7 @@ A package is written in two stages, each by roles you run.
 - A round whose findings are all minor goes back to its writer with no new review, the checks standing in; a blocking finding, or a change in a package's shape, gets a review.
 - Two rounds of a pair at most; what stays open after them goes to the person. The passes closed change asks for, below, belong to the round that caused them, and are not counted.
 
-**Closed change.** Whenever a round changes what an item or an entry states, the principles' `closed change` asks that every site resting on it be revisited. Before the round, copy the package into the working directory; after it, run `ref_sites.py <copy> <package>` and send the sites it lists to the writer, who revisits each and amends what no longer holds. Copy again and repeat until a pass amends nothing. The script matches references by their text, as its docstring says; a site it cannot see is the writer's to find.
+**Closed change.** Whenever a round changes what an item or an entry states, the principles' `closed change` asks that every site resting on it be revisited. Before the round, copy the package into the working directory; after it, run `python3 -I .agents/skills/quoll-design/scripts/ref_sites.py <copy> <package>` and send the sites it lists to the writer, who revisits each and amends what no longer holds. Copy again and repeat until a pass amends nothing. The script matches references by their text, as its docstring says; a site it cannot see is the writer's to find. Superseded historical entries are neither current edits nor sites requiring amendment.
 
 ## Prompts for the roles
 
@@ -60,13 +60,16 @@ A role is fresh for each task and continued through that task's rounds. Where yo
 
 ## Checks
 
-The checks are this skill's `scripts/`, each run with `python3 -I` from the repository's top, as `python3 -I .agents/skills/quoll-design/scripts/check_blocks.py std`. Each prints what it finds, for you or a reviewer to judge.
+The checks are this skill's `scripts/`, each run with `python3 -I` from the repository's top. Package commands support v0.4 source only. Default semantic output is high-confidence and, with a baseline, diff-filtered; it is not a broad lexical gate. Each prints what it finds, for you or a reviewer to judge.
 
-- `check_blocks.py <package dir>`: every view block's groups, items and widths.
-- `check_bare.py <package dir>`: every bare use of a name some reference uses, each a missing reference, a use beyond sight, or the word in another sense.
-- `check_part.py <header> <decisions> <MNEMONIC> name=<header> ...`: one module's references, its items' order, and its entries' *Stated by*; for a module with a body, concatenate its header and body into one file first.
-- `ref_sites.py <old copy> <package dir>`: the sites resting on what changed between two copies of a package.
-- `extract.py <out> <title> <record>:<ID>,<ID> ...`: blocks of a record by their IDs, whole, into one inputs file.
+- `check_blocks.py <package dir>` remains the view-block check: every block's groups, items and widths.
+- `check_package.py CURRENT [--base BASELINE] [--dependency DEPENDENCY ...] [--review]` checks a whole v0.4 package and accepts only an earlier v0.4 package state as a baseline. Dependencies are materialized semantic inputs, not resolution. Full current: `python3 -I .agents/skills/quoll-design/scripts/check_package.py std`; base-filtered: `python3 -I .agents/skills/quoll-design/scripts/check_package.py std --base .quoll-wip/<issue>-<topic>/before`; review: `python3 -I .agents/skills/quoll-design/scripts/check_package.py std --review`.
+- `check_bare.py CURRENT [--base BASELINE] [--review]` retains only the targeted bare-compound errors, adding bare-word reviews in review mode: `python3 -I .agents/skills/quoll-design/scripts/check_bare.py std --review`. The `own`/`one` ambiguity guard can suppress a genuine lexical use; no general NLP is intended.
+- `check_part.py` is a migration shim only; every invocation names the `check_package.py CURRENT [--base BASELINE] [--review]` replacement and exits 2. Manual `name=<header>` arguments and header/body concatenation are obsolete.
+- `ref_sites.py <old copy> <package dir>` lists the sites resting on what changed between two copies of a package: `python3 -I .agents/skills/quoll-design/scripts/ref_sites.py .quoll-wip/<issue>-<topic>/before std`.
+- `extract.py <out> <title> <record>:<ID>,<ID> ...` extracts blocks of a record by their IDs, whole, into one inputs file.
+
+Run all four test suites with `python3 -I -m unittest discover -s .agents/skills/quoll-design/tests -p 'test_*.py'`.
 
 ## Closing a ticket
 
