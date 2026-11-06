@@ -1,157 +1,407 @@
-"""List every site resting on what changed between two copies of a package.
+"""List sites resting on items and decisions changed between two package copies.
 
-usage: ref_sites.py OLD_DIR NEW_DIR
-OLD_DIR and NEW_DIR are two copies of one package's directory. Copy the package before a round of changes, and run
-this from the copy to the package after it. The modules are the root, whose files stand at the package's top, and
-each path the manifest lists under Modules, nested ones included, each named by its path's last step; each header of
-a module, `<stem>.h.md` or `<stem>.private.h.md` in its directory, is one of its interfaces, the one whose stem is the
-module's name its default. Lists:
-- for every item of an interface or a body changed or gone, each line in NEW_DIR holding a reference landing on it:
-  `item`, `interface.item` or `default.item` within its own module's files, and `module.item`, for its default's
-  items, or `module.interface.item` from anywhere;
-- for every decision entry changed or gone, each line citing its ID;
-- for every item changed in an interface, each place relating to that interface: a front's `includes` or
-  `implements`, an `impl` line, and the body of a module implementing its default.
-Its limits: a reference is matched by its text alone, with no check of sight, so two modules sharing a name are both
-matched; and an item is matched by its name, so a reference spanning two lines of a view block is found only where
-its brackets hold the whole name.
+Usage: ref_sites.py OLD_DIR NEW_DIR. Both directories are v0.4 package states.
+References are matched textually, without sight or resolution checks.
 """
-import re, sys, os, glob
 
-def items(path):
-    out = {}
-    if not os.path.exists(path): return out
-    t = open(path, encoding='utf-8').read()
-    for b in re.findall(r'^```\n(.*?)^```', t, re.S | re.M):
-        lines = [l for l in b.split('\n') if l.strip()]
-        if not lines: continue
-        least = min(len(l) - len(l.lstrip(' ')) for l in lines)
-        grp, ii, cur = None, None, None
-        for l in lines:
-            ind = len(l) - len(l.lstrip(' ')); body = l.strip()
-            if re.fullmatch(r'(ensures|requires|open):|impl \[[^\]]+\]:', body):
-                grp, ii, cur = ind, None, None; continue
-            if grp is not None and ind <= grp: grp, ii = None, None
-            if ii is None: ii = ind if grp is not None else least
-            if ind == ii:
-                m = re.match(r'(\S(?:.*?\S)?)  +(.*)', body) or re.match(r'(\S.*)', body)
-                cur = m.group(1); out[cur] = (m.group(2) if m.lastindex == 2 else '')
-            elif cur: out[cur] += ' ' + body
-    return out
+from __future__ import annotations
 
-def root_name(root):
-    """The package's name: the first heading of its manifest, package.md."""
-    for line in open(os.path.join(root, 'package.md'), encoding='utf-8'):
-        if line.startswith('# '): return line[2:].strip()
-    sys.exit(f'{root}/package.md: no first-level heading naming the package')
+import argparse
+from dataclasses import dataclass
+from pathlib import Path
+import re
+import sys
 
-def manifest_paths(root):
-    """The module paths the manifest lists: the item names of its Modules section's first fenced block."""
-    t = open(os.path.join(root, 'package.md'), encoding='utf-8').read()
-    m = re.search(r'^## Modules[ \t]*\n.*?^```[^\n]*\n(.*?)^```', t, re.S | re.M)
-    if not m: return []
-    lines = [l for l in m.group(1).split('\n') if l.strip()]
-    least = min(len(l) - len(l.lstrip(' ')) for l in lines)
-    return [l.split()[0] for l in lines if len(l) - len(l.lstrip(' ')) == least]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-def modules(root):
-    """Each module, keyed by its path ('' for the root): its name, its directory, its interfaces' headers by stem,
-    and its body."""
-    mods = {}
-    for path in [''] + manifest_paths(root):
-        name = path.rstrip('/').split('/')[-1] if path else ROOT
-        d = os.path.join(root, path)
-        heads = {}
-        for h in sorted(glob.glob(os.path.join(d, '*.h.md'))):
-            stem = os.path.basename(h)[:-len('.h.md')]
-            heads[stem[:-len('.private')] if stem.endswith('.private') else stem] = h
-        mods[path] = (name, d, heads, os.path.join(d, f'{name}.body.md'))
-    return mods
+from quollcheck import Decision, Module, Package, SourceFile, load_package  # noqa: E402
 
-def files_of(mods, path):
-    """A module's own files: the Markdown files of its directory, its nested modules' directories aside."""
-    return sorted(glob.glob(os.path.join(mods[path][1], '*.md')))
 
-old, new = sys.argv[1], sys.argv[2]
-ROOT = root_name(new)
-mods = modules(new)
-oldpath = lambda p: os.path.join(old, os.path.relpath(p, new))
+@dataclass(frozen=True)
+class Change:
+    module_path: str
+    module_name: str
+    stem: str | None
+    item: str
+    how: str
+    impl: str | None = None
 
-# Items: (module path, interface stem or None for the body, item name, how).
-changed = []
-for path, (name, d, heads, body) in mods.items():
-    for stem, p in list(heads.items()) + [(None, body)]:
-        o, n = items(oldpath(p)), items(p)
-        for it, stmt in o.items():
-            if it not in n: changed.append((path, stem, it, 'gone'))
-            elif ' '.join(n[it].split()) != ' '.join(stmt.split()): changed.append((path, stem, it, 'changed'))
-        for it in n:
-            if it not in o: changed.append((path, stem, it, 'new'))
+    @property
+    def default(self) -> bool:
+        return self.stem == self.module_name
 
-def spellings(path, stem, it, inside):
-    name = mods[path][0]
-    default = stem == name
-    outside = set() if stem is None else ({f'{name}.{it}'} if default else {f'{name}.{stem}.{it}'})
-    if inside:
-        return {it} | ({f'{stem}.{it}'} if stem and not default else set()) | ({f'default.{it}'} if default else set()) | outside
-    return outside
 
-blank_code = lambda t: re.sub(r'`[^`\n]*`', lambda x: ' ' * len(x.group()), t)
-for path, stem, it, how in changed:
-    name = mods[path][0]
-    print(f'## {name}{"." + stem if stem and stem != name else ""}.{it} ({how})' if stem else f'## {name} body: {it} ({how})')
-    if how == 'new': continue
-    for p2 in mods:
-        want = spellings(path, stem, it, p2 == path)
-        if not want: continue
-        for f in files_of(mods, p2):
-            text = open(f, encoding='utf-8').read(); lines = text.split('\n'); seen = set()
-            for m in re.finditer(r'\[([^\]\n]+(?:\n *[^\]\n]+)*)\](?!\()', blank_code(text)):
-                if ' '.join(m.group(1).split()) in want:
-                    i = text.count('\n', 0, m.start()) + 1
-                    if i in seen: continue
-                    seen.add(i); print(f'  {os.path.relpath(f, new)}:{i}: {lines[i-1].strip()[:160]}')
+def normalized(text: str) -> str:
+    return " ".join(text.split())
 
-# Decisions: an entry whose text changed, or is gone; its sites are every other line citing its ID.
-def entries(p):
-    out = {}
-    if not os.path.exists(p): return out
-    for e in re.split(r'\n(?=\*\*[A-Z][A-Za-z0-9-]*-\d+\. )', open(p, encoding='utf-8').read()):
-        m = re.match(r'\*\*([A-Z][A-Za-z0-9-]*-\d+)\. ', e)
-        if m: out[m.group(1)] = ' '.join(e.split())
-    return out
-allfiles = [f for p2 in mods for f in files_of(mods, p2)]
-for path, (name, d, heads, body) in mods.items():
-    dec = os.path.join(d, f'{name}.decisions.md')
-    o, n = entries(oldpath(dec)), entries(dec)
-    for i in sorted(o, key=lambda x: int(x.rsplit('-', 1)[1])):
-        how = 'gone' if i not in n else ('changed' if n[i] != o[i] else None)
-        if not how: continue
-        print(f'## {i} ({how})')
-        for f in allfiles:
-            for k, line in enumerate(open(f, encoding='utf-8'), 1):
-                if re.search(r'(?<![A-Za-z0-9-])' + re.escape(i) + r'(?![0-9-])', line) and not line.startswith(f'**{i}. '):
-                    print(f'  {os.path.relpath(f, new)}:{k}: {line.strip()[:160]}')
 
-# Relations: for an item changed in an interface, the places relating to that interface: a front's `includes` or
-# `implements`, an `impl` line, and the body of a module implementing its default.
-for path, stem, it, how in changed:
-    if how == 'new' or stem is None: continue
-    name, d, heads, body = mods[path]
-    default = stem == name
-    inside = {stem} | ({'default'} if default else set())
-    outside = {name} if default else {f'{name}.{stem}'}
-    sites = []
-    for p2 in mods:
-        for f in files_of(mods, p2):
-            for k, line in enumerate(open(f, encoding='utf-8'), 1):
-                found = re.findall(r'^\s*(?:includes|implements):\s*\[?([^\]\n]*)\]?', line) + re.findall(r'^\s*impl \[([^\]]+)\]:', line) + re.findall(r'^\s*-\s+(\S+)\s*$', line)
-                for g in found:
-                    for x in [y.strip().strip('"\'') for y in g.split(',') if y.strip()]:
-                        if (p2 == path and x in inside) or x in outside:
-                            sites.append(f'  {os.path.relpath(f, new)}:{k}: {line.strip()[:160]}')
-    if default and os.path.exists(body):
-        sites.append(f'  {os.path.relpath(body, new)}: the body of [{name}], implementing its default')
+def interface_stem(source: SourceFile) -> str:
+    name = Path(source.path).name
+    if name.endswith(".private.h.md"):
+        return name[: -len(".private.h.md")]
+    return name[: -len(".h.md")]
+
+
+def interfaces(module: Module | None) -> dict[str, SourceFile]:
+    if module is None:
+        return {}
+    result: dict[str, SourceFile] = {}
+    for source in sorted(module.files, key=lambda file: file.path):
+        if source.kind in {"header", "private header"}:
+            result[interface_stem(source)] = source
+    return result
+
+
+def interface_identity(module: Module, relation: str) -> tuple[str, str] | None:
+    stem = module.name if relation == "default" else relation
+    if stem in interfaces(module):
+        return module.path, stem
+    return None
+
+
+def resolved_interface(
+    package: Package, module: Module | None, relation: str
+) -> tuple[str, str] | None:
+    relation = relation.strip().strip("\"'")
+    if module is not None and ("." not in relation or relation == "default"):
+        local = interface_identity(module, relation)
+        if local is not None:
+            return local
+    parts = relation.split(".")
+    candidates: list[tuple[str, str]] = []
+    root_candidate: tuple[str, str] | None = None
+    for target in package.modules:
+        if len(parts) == 1:
+            identity = interface_identity(target, "default") if target.name == relation else None
+            if target.path == "":
+                root_candidate = interface_identity(target, relation)
+        else:
+            qualifiers = {target.name, target.path.replace("/", ".")}
+            if target.path == "":
+                qualifiers.add(package.name)
+            identity = (
+                interface_identity(target, parts[-1])
+                if ".".join(parts[:-1]) in qualifiers
+                else None
+            )
+        if identity is not None:
+            candidates.append(identity)
+    if root_candidate is not None:
+        return root_candidate
+    unique = list(dict.fromkeys(candidates))
+    return unique[0] if len(unique) == 1 else None
+
+
+def relation_identity(
+    package: Package, module: Module | None, relation: str | None
+) -> str | None:
+    if relation is None:
+        return None
+    resolved = resolved_interface(package, module, relation)
+    if resolved is None:
+        return f"relation:{relation}"
+    path, stem = resolved
+    return f"interface:{path}:{stem}"
+
+
+def items(
+    source: SourceFile | None, package: Package, module: Module | None
+) -> dict[tuple[str, str | None, int], str]:
+    if source is None:
+        return {}
+    result: dict[tuple[str, str | None, int], str] = {}
+    occurrences: dict[tuple[str, str | None], int] = {}
+    for item in source.items:
+        identity = (item.name, relation_identity(package, module, item.impl))
+        occurrence = occurrences.get(identity, 0)
+        occurrences[identity] = occurrence + 1
+        result[(*identity, occurrence)] = normalized(item.statements)
+    return result
+
+
+def module_name(old: Module | None, new: Module | None) -> str:
+    return (new or old).name  # type: ignore[union-attr]
+
+
+def item_changes(old: Package, new: Package) -> list[Change]:
+    changes: list[Change] = []
+    old_modules = old.module_map
+    new_modules = new.module_map
+    for path in sorted(set(old_modules) | set(new_modules)):
+        old_module = old_modules.get(path)
+        new_module = new_modules.get(path)
+        name = module_name(old_module, new_module)
+        old_interfaces = interfaces(old_module)
+        new_interfaces = interfaces(new_module)
+        targets: list[tuple[str | None, SourceFile | None, SourceFile | None]] = [
+            (
+                stem,
+                old_interfaces.get(stem),
+                new_interfaces.get(stem),
+            )
+            for stem in sorted(set(old_interfaces) | set(new_interfaces))
+        ]
+        targets.append(
+            (
+                None,
+                old_module.body if old_module else None,
+                new_module.body if new_module else None,
+            )
+        )
+        for stem, old_source, new_source in targets:
+            old_items = items(old_source, old, old_module)
+            new_items = items(new_source, new, new_module)
+            keys = sorted(
+                set(old_items) | set(new_items),
+                key=lambda key: (key[0], key[1] or "", key[2]),
+            )
+            for item, impl, occurrence in keys:
+                key = (item, impl, occurrence)
+                if key not in new_items:
+                    how = "gone"
+                elif key not in old_items:
+                    how = "new"
+                elif old_items[key] != new_items[key]:
+                    how = "changed"
+                else:
+                    continue
+                changes.append(Change(path, name, stem, item, how, impl))
+    return changes
+
+
+def markdown_sources(package: Package) -> list[SourceFile]:
+    files = {
+        source.path: source
+        for module in package.modules
+        for source in module.files
+        if source.path.endswith(".md")
+    }
+    return [files[path] for path in sorted(files)]
+
+
+def historical_lines(source: SourceFile) -> set[int]:
+    lines: set[int] = set()
+    for decision in source.decisions:
+        if decision.active:
+            continue
+        end = max(decision.line, decision.end_line)
+        lines.update(range(decision.line, end + 1))
+    return lines
+
+
+def mask_code_spans(text: str) -> str:
+    return re.sub(
+        r"`[^`\n]*`",
+        lambda match: " " * len(match.group(0)),
+        text,
+    )
+
+
+def spellings(change: Change, inside: bool) -> set[str]:
+    stem = change.stem
+    item = change.item
+    name = change.module_name
+    default = change.default
+    outside = set() if stem is None else (
+        {f"{name}.{item}"} if default else {f"{name}.{stem}.{item}"}
+    )
+    if stem is not None and not default and change.module_path == "":
+        outside.add(f"{stem}.{item}")
+    if not inside:
+        return outside
+    local = {item}
+    if stem and not default:
+        local.add(f"{stem}.{item}")
+    if default:
+        local.add(f"default.{item}")
+    return local | outside
+
+
+def print_reference_sites(change: Change, new: Package) -> None:
+    stem = change.stem
+    if stem:
+        suffix = "" if change.default else f".{stem}"
+        print(f"## {change.module_name}{suffix}.{change.item} ({change.how})")
+    else:
+        print(f"## {change.module_name} body: {change.item} ({change.how})")
+    if change.how == "new":
+        return
+    for source in markdown_sources(new):
+        module = next(
+            (module for module in new.modules if source in module.files),
+            None,
+        )
+        if module is None:
+            continue
+        wanted = spellings(change, module.path == change.module_path)
+        if not wanted:
+            continue
+        history = historical_lines(source)
+        seen: set[int] = set()
+        for match in re.finditer(
+            r"\[([^\]\n]+(?:\n *[^\]\n]+)*)\](?!\()",
+            mask_code_spans(source.text),
+        ):
+            if normalized(match.group(1)) not in wanted:
+                continue
+            line = source.text.count("\n", 0, match.start()) + 1
+            if line in history or line in seen:
+                continue
+            seen.add(line)
+            text = source.text.splitlines()[line - 1].strip()[:160]
+            print(f"  {source.path}:{line}: {text}")
+
+
+def decisions(module: Module | None) -> dict[str, Decision]:
+    if module is None or module.decisions is None:
+        return {}
+    return {decision.id: decision for decision in module.decisions.decisions}
+
+
+def decision_key(identifier: str) -> tuple[str, int, str]:
+    prefix, separator, number = identifier.rpartition("-")
+    if separator and number.isdigit():
+        return prefix, int(number), identifier
+    return identifier, 0, identifier
+
+
+def decision_changes(old: Package, new: Package) -> list[tuple[str, str]]:
+    changes: list[tuple[str, str]] = []
+    old_modules = old.module_map
+    new_modules = new.module_map
+    for path in sorted(set(old_modules) | set(new_modules)):
+        old_decisions = decisions(old_modules.get(path))
+        new_decisions = decisions(new_modules.get(path))
+        for identifier in sorted(old_decisions, key=decision_key):
+            previous = old_decisions[identifier]
+            current = new_decisions.get(identifier)
+            if not previous.active:
+                continue
+            if current is not None and not current.active:
+                # Gaining a successor retires the entry; it is not a current edit.
+                continue
+            if current is None:
+                changes.append((identifier, "gone"))
+            elif normalized(previous.text) != normalized(current.text):
+                changes.append((identifier, "changed"))
+    return changes
+
+
+def print_decision_sites(identifier: str, how: str, new: Package) -> None:
+    print(f"## {identifier} ({how})")
+    pattern = re.compile(r"(?<![A-Za-z0-9-])" + re.escape(identifier) + r"(?![0-9-])")
+    for source in markdown_sources(new):
+        history = historical_lines(source)
+        for line_number, line in enumerate(source.text.splitlines(), 1):
+            if line_number in history or line.startswith(f"**{identifier}. "):
+                continue
+            if pattern.search(line):
+                print(f"  {source.path}:{line_number}: {line.strip()[:160]}")
+
+
+def relation_values(front: dict, key: str) -> list[str]:
+    value = front.get(key)
+    if isinstance(value, list):
+        return [entry for entry in value if isinstance(entry, str)]
+    return []
+
+
+def relation_matches(value: str, change: Change, inside: bool) -> bool:
+    value = value.strip().strip("\"'")
+    local = {change.stem or ""}
+    if change.default:
+        local.add("default")
+    outside = (
+        {change.module_name, f"{change.module_name}.default"}
+        if change.default
+        else {f"{change.module_name}.{change.stem}"}
+    )
+    if change.stem is not None and not change.default and change.module_path == "":
+        outside.add(change.stem)
+    return value in outside or (inside and value in local)
+
+
+def front_relation_line(source: SourceFile, key: str) -> int:
+    pattern = re.compile(rf"^\s*{re.escape(key)}\s*=", re.MULTILINE)
+    match = pattern.search(source.text)
+    if match is None:
+        return 1
+    return source.text.count("\n", 0, match.start()) + 1
+
+
+def print_relation_sites(change: Change, new: Package) -> None:
+    if change.how == "new" or change.stem is None:
+        return
+    sites: list[str] = []
+    for module in new.modules:
+        for source in module.files:
+            if not source.path.endswith(".md"):
+                continue
+            inside = module.path == change.module_path
+            for key in ("includes", "implements"):
+                values = relation_values(source.front, key)
+                if any(relation_matches(value, change, inside) for value in values):
+                    line_number = front_relation_line(source, key)
+                    line = source.text.splitlines()[line_number - 1].strip()[:160]
+                    sites.append(f"  {source.path}:{line_number}: {line}")
+            for match in re.finditer(
+                r"^\s*impl\s+\[([^\]]+)\]\s*:\s*$",
+                source.text,
+                re.MULTILINE,
+            ):
+                if relation_matches(match.group(1), change, inside):
+                    line_number = source.text.count("\n", 0, match.start()) + 1
+                    sites.append(
+                        f"  {source.path}:{line_number}: {match.group(0).strip()[:160]}"
+                    )
+    if change.default:
+        module = new.module_map.get(change.module_path)
+        if module and module.body:
+            sites.append(
+                f"  {module.body.path}: the body of [{change.module_name}], implementing its default"
+            )
     if sites:
-        print(f'## {name}{"" if default else "." + stem}.{it} (relations)')
-        for x in dict.fromkeys(sites): print(x)
+        suffix = "" if change.default else f".{change.stem}"
+        print(f"## {change.module_name}{suffix}.{change.item} (relations)")
+        for site in dict.fromkeys(sites):
+            print(site)
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(
+        description="List textual sites resting on changes between two package copies."
+    )
+    result.add_argument("old", metavar="OLD_DIR", help="old v0.4 package copy")
+    result.add_argument("new", metavar="NEW_DIR", help="current v0.4 package copy")
+    return result
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parser().parse_args(argv)
+    if not Path(args.old).is_dir() or not Path(args.new).is_dir():
+        parser().error("OLD_DIR and NEW_DIR must be package directories")
+    try:
+        old = load_package(args.old)
+        new = load_package(args.new)
+    except (OSError, ValueError) as error:
+        print(f"ref_sites.py: {error}", file=sys.stderr)
+        return 2
+    untrusted = False
+    for label, package in (("OLD_DIR", old), ("NEW_DIR", new)):
+        for finding in package.findings:
+            print(f"{label}: {finding}", file=sys.stderr)
+            untrusted = True
+    if untrusted:
+        return 2
+    changes = item_changes(old, new)
+    for change in changes:
+        print_reference_sites(change, new)
+    for identifier, how in decision_changes(old, new):
+        print_decision_sites(identifier, how, new)
+    for change in changes:
+        print_relation_sites(change, new)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
