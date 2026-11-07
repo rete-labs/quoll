@@ -1,1 +1,4 @@
 .quoll-wip
+
+__pycache__/
+*.py[cod]
