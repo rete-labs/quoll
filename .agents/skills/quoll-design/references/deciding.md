@@ -66,3 +66,5 @@ The person rules. Record the verdict on its axis, below its lean, keeping everyt
 ## Into a package
 
 The same ticket's architect records the current ratified verdicts into the package's decisions files, as the definition's grammar writes an entry and its principles' `lifetime` keeps one; whether an entry was ever committed, which `lifetime` turns on, `git log -S'<ID>'` tells. How an entry is compacted from its verdict is in [`architect.md`](architect.md). The package's final source and these entries are the committed result, not the working record.
+
+Each writing round receives a snapshot of the ratified verdicts it uses, and review receives that same frozen snapshot. Deciding may continue while review runs: record newer verdicts in this working record, but do not alter the frozen round's inputs or describe the review as covering them. The orchestrator gives the next writing round both the review findings and the newer verdicts, explicitly distinguished, so that no ratified amendment is lost and no reviewer is asked to review a moving target.
