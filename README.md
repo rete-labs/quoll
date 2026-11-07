@@ -4,7 +4,7 @@ An AI-first language for engineering software, and for designing anything that k
 
 It forces agents to operate on crystallized contracts rather than loose semantic interpretation. By making the interface formal and the body private, source code is turned into a rigid, non-eroding "exoskeleton" that agents can safely evolve, and humans quickly read.
 
-Experimental: version 0.3 is being written.
+Experimental: version 0.4.0.
 
 ## License
 

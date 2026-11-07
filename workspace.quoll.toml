@@ -1,0 +1,2 @@
+packages = ["language", "std"]
+description = "The Quoll language and standard library, maintained and published at one shared version."
