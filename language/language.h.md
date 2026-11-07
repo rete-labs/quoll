@@ -4,7 +4,7 @@ What the language is, for whoever reads or writes a [model.package] in it, agent
 
 ```
   target     anything an agent generates from a source: code, tests, configuration files, skills
-             and published documents
+             and documents of other kinds
   purpose    a language for the source of a system: the text agents maintain, from which
              they generate the system's [target]s
   reach      any system designed over a long series of changes, software first; the core,
@@ -20,10 +20,10 @@ What the language is, for whoever reads or writes a [model.package] in it, agent
              while people read only what nothing else holds
   measure    how the [goal] is to be checked, not yet run: a scripted series of changes, over
              which, per change, the agents' effort, the [model.module]s touched and what people
-             read stay flat, and the signs of erosion, [model.reference]s into [model.body]s,
-             reasons repeated and statements that contradict, stay low
+             read stay flat, and the [principles.sign]s of erosion, [model.reference]s into
+             [model.body]s, reasons repeated and statements that contradict, stay low
   paradigm   a programming language one level up, natural to engineers and architects: its
-             unit the [model.module], and every other paradigm a style a framework declares
+             unit the [model.module], and every other [paradigm] a style a framework declares
              over [model.module]s, among its [model.framework rules]
   character  simple, as elegant C is rather than convoluted C++, and grown from practice
              rather than theory
@@ -33,6 +33,6 @@ What the language is, for whoever reads or writes a [model.package] in it, agent
 
 ```
   ensures:
-    formal  every statement is in natural language and formal from an agent's side: each one
+    formal  every statement is in natural language and [formal] from an agent's side: each one
             an agent can follow, and each rule one it can check, or, a judgement, weigh
 ```

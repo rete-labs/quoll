@@ -1,0 +1,4 @@
+id = "pkg:quoll/rete-labs.ru/quoll/std"
+edition = "0.4.0"
+description = "The core library for packages written in Quoll."
+dependencies = []

@@ -18,10 +18,11 @@ What every [model.package] keeps across its history and its writers, and what re
 
 ```
   ensures:
-    terms only             these [model.item]s speak of a [model.package] in [model]'s terms alone,
-                           its [model.module]s, [model.interface]s, [model.item]s, [model.decision]s
-                           and its history, never of how it is written or stored, nor of who
-                           writes it or how review is run
+    terms only             these [model.item]s speak of a [model.package] in the terms of the
+                           [model.module] providing [model.item] alone, its [model.module]s,
+                           [model.interface]s, [model.item]s, [model.decision]s and its history,
+                           never of how it is written or stored, nor of who writes it or how
+                           review is run
   requires:
     single responsibility  [information hiding] read on what changes together: a [model.module]
                            answers to one reason to change, what changes together for one reason
@@ -71,7 +72,7 @@ What every [model.package] keeps across its history and its writers, and what re
                            points review at splitting the [model.module]
     several faces          a [model.module] providing several [model.interface]s is better with no
                            [model.default interface] among them; a judgement
-    needed pairs           a [model.body] pairs an [model.item] of an [model.interface] its
+    needed pairs           a [model.body] [model.pair]s an [model.item] of an [model.interface] its
                            [model.module] implements only where how it is kept needs saying beyond
                            the [model.body]'s other [model.item]s; a judgement
     acyclic definitions    no [model.item] rests on itself through the [model.item]s its
@@ -82,7 +83,7 @@ What every [model.package] keeps across its history and its writers, and what re
                            members, none of which names it
     no restating           no statement restates what a [model.item] states, or what the
                            [model.edition] its [model.package] is written in states: it
-                           references the [model.item], or writes in that [model.edition]'s
+                           [model.reference]s the [model.item], or writes in that [model.edition]'s
                            terms, and may build on an [model.item] through a [model.reference]
                            to it, a [model.decision]'s own statement aside; a [model.decision]
                            holds only what its [model.field]s hold, Stated by among them; what
@@ -96,9 +97,11 @@ What every [model.package] keeps across its history and its writers, and what re
                            [model.decision] of its [model.package] ever bears it; until it is
                            committed to its [model.package]'s history it may be withdrawn, leaving
                            nothing in its place, and once committed it is never withdrawn, only
-                           superseded or moved; one moving to another [model.module] leaves its
-                           own, committed or not, for a successor there, as [model.field]'s
-                           Formerly has it
+                           superseded or moved; a superseded one keeps only its ID and Superseded
+                           by pointer, its former prose left to its history and its former choice
+                           among its successor's Rejected options; one moving to another
+                           [model.module] leaves its own, committed or not, for a successor there,
+                           as [model.field]'s Formerly has it
     labels kept            an agent writing a [model.package] keeps every [model.label] people gave
                            an [model.item] or a [model.decision], and gives none of its own
     english                a [model.package] is better stated in English, the language's own
@@ -117,12 +120,12 @@ What every [model.package] keeps across its history and its writers, and what re
                            answer possible is review's to judge, the rule otherwise a fact
     body depth             a [model.body] says, of how its [model.module] keeps the
                            [model.interface]s it implements, all a regeneration of its code must
-                           not change: whatever anyone outside the [model.module] would notice came
-                           out otherwise, what it leaves for a later run or release to read among
-                           it; the code decides alone what a regeneration may change unnoticed, as
-                           its data structures, algorithms, libraries and idioms; whether anyone
-                           would notice is review's to judge, the rule otherwise a fact, and how
-                           code is made from a [model.body] waits
+                           not change: whatever anyone outside the [model.module] would notice
+                           came out otherwise, what it leaves for a later run or [model.release]
+                           to read among it; the code decides alone what a regeneration may
+                           change unnoticed, as its data structures, algorithms, libraries and
+                           idioms; whether anyone would notice is review's to judge, the rule
+                           otherwise a fact, and how code is made from a [model.body] waits
     reported questions     a writer meeting a question that what it writes from leaves open, and
                            that would be noticed outside what it writes, reports it against what
                            left it open and settles it provisionally until that answers it: a
