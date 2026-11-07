@@ -1,8 +1,8 @@
 # Quoll
 
-This repository holds Quoll, a language for the source of a system, and the packages written in it. What the language is, who writes and reads it, and what it aims at is stated by the language itself, in [`language/quoll.h.md`](language/quoll.h.md); the whole definition is [`language/`](language/package.md), written in Quoll. It is the one reference for the language: read the parts your work needs, and never restate them anywhere else.
+This repository holds Quoll, a language for the source of a system, and the packages written in it. What the language is, who writes and reads it, and what it aims at is stated by the language itself, in [`language/language.h.md`](language/language.h.md); the whole definition is the [`language`](language/) package, written in Quoll. It is the one reference for the language: read the parts your work needs, and never restate them anywhere else.
 
-Every directory at the repository's top holding a `package.md` is a package, written in Quoll; together they form one project, released at one version, tagged `vX.Y.Z`.
+Every directory at the repository's top holding a `package.quoll.toml` is a package, written in Quoll; together they form one workspace, released at one shared version with a separate `<package-path>/vX.Y.Z` tag for each package.
 
 ## Working here
 
