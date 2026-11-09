@@ -16,7 +16,8 @@ Read [`AGENTS.md`](../../../AGENTS.md) first: its conventions bind everything he
 3. Read what of the definition the ticket touches, and the package it works on, as it stands. Establish what exists and what is only designed: a decision resting on a module or a file that does not exist yet is a mistake this prevents.
 4. Work it by its label:
    - `write`: decide and write one package change. Take what the ticket leaves open through the deciding pass below, then write its final package by the roles below, reopening a verdict with the person whenever the writing or review tests it. Its working `decisions.md` stays local; its final source and component decisions are committed together.
-   - `generate` and `release`: not covered by this skill yet. Say so to the person and stop.
+   - `generate`: not covered by this skill yet. Say so to the person and stop.
+   - `release`: publish the release as [`references/release.md`](references/release.md) has it.
 
 ## Deciding
 
