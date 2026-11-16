@@ -1,6 +1,6 @@
 **GRAM-1.** *Superseded by* GRAM-30
 
-**GRAM-30. Write the public [manifest] as structured identity, edition, description and dependency [selector]s.**
+**GRAM-30. Write the canonical public [manifest] as structured identity, edition, description and dependency [selector]s.**
 *Stated by* [manifest], [package id] and [selector].
 *Because* every fact a tool reads or edits then has one exact structured representation, while a renderer can derive the [layout.package] title and edition link instead of maintaining a second reading face.
 *Because* a Package URL already has an optional version position, so one [selector] carries the canonical identity and requirement without separate identity and version fields, while the final segment supplies the default local name.
@@ -9,11 +9,11 @@
 *Accepting* the full three-form pseudo-version grammar and exact prerelease admission, with no comparator or range grammar added for partial [selector]s; a structured [manifest] with no Markdown title or [lead], dependency-list uniqueness by unversioned [package id] within one major compatibility series, permitting distinct major series of one [package id], and no inline alias field.
 *Rejected* a Markdown [manifest] or front-matter shell, which leaves tool-read facts in presentation markup; a separate [layout.package] name or self-version, which duplicates another authority; a vanity [package id] with no trust domain, which loses global namespacing; a mapping from local names or object entries with separate identity and version, which repeats defaults without adding meaning; [source locator]s in the [manifest], which couple identity to hosting; a public-face list, which duplicates the root [layout.header]s; a membership list, which publishes internal structure and duplicates [modules]; and comparator or range [selector]s, which add grammar before a consumer needs it.
 
-**GRAM-2. Write the [build] as [view]s alone.**
-*Stated by* [build].
-*Because* a [layout.build] states things, a flow and rules, so one syntax writes every Markdown design file.
+**GRAM-2. Write the [assembly] as [view]s alone.**
+*Stated by* [assembly].
+*Because* a [layout.assembly] states things, a flow and rules, so one syntax writes every Markdown design file.
 *Accepting* [view]s in a [layout.source file] that holds assembly rather than design.
-*Revisit* when the build process is worked on.
+*Revisit* the open [layout.assembly form] at the first derived-target implementation.
 *Rejected* headings of its own, which the language would define for one kind of [layout.source file]; and assembly keys in a [front].
 *Formerly* the renderer's SYN-2.
 
@@ -53,7 +53,7 @@
 
 **GRAM-6.** *Superseded by* GRAM-31
 
-**GRAM-31. Write every Markdown design file as [view]s over [item] lines within [markdown], keeping wholly structured metadata in [toml] instead.**
+**GRAM-31. Write every canonical Markdown design file as [view]s over [item] lines within [markdown], keeping wholly structured canonical metadata in [toml] instead.**
 *Stated by* [markdown], [construct], [section], [view], [view block], [written] and [no empty view].
 *Because* a Markdown design file then reads as written wherever that flavour is shown, its tables, task boxes and links among it, and the language's [construct]s stand apart from [markdown]'s own forms, each defined beside it.
 *Because* the language extends Markdown already, by its [reference]s, and grows by an [item].
@@ -63,7 +63,7 @@
 *Because* a [layout.header] and a [layout.body] then share one outline, so a reader of one knows where to look in the other.
 *Because* a [view] with nothing to hold states nothing, so none is written to keep an outline full.
 *Accepting* [column]s kept aligned on every edit, which agents do readily and a formatter can restore; links not clickable within a [view block]; a [view block] shown in monospace on a code host; and pure structured files outside this Markdown form.
-*Revisit* when the language takes a format of its own, as it likely will by its v1.0; and for tooling of the [view block]s, highlighting, drawings in text and editor support with tooltips and links, never braces or other formal punctuation.
+*Revisit* the concrete syntax in a dedicated design pass informed by native and document profiles, with canonical Markdown retained meanwhile and no migration scheduled.
 *Rejected* CommonMark alone, which reads a table as a paragraph; the language's [construct]s found line by line over the whole text, which reads a heading or a bracket within a fenced block otherwise than every renderer does; a [markdown] list, a bold name and its statement on each line, which reads as a document's prose where engineers read code; columns of text alone, with no headings to navigate; a programming language's syntax, statements quoted within braces, formal punctuation that reads as code with strings in it; prose within structured data for design [view]s, the least readable of all; a [markdown] shell for wholly structured metadata, which misstates the file's format; an Illustrations [section] beside the [view]s, which nothing used; and an empty [view] written over an empty fenced block.
 *Formerly* the renderer's SYN-7.
 
@@ -88,13 +88,14 @@
 
 **GRAM-9.** *Superseded by* GRAM-32
 
-**GRAM-32. Write every Quoll-owned structured file and [front] in [toml], and declare PURL and qualified-name aliases in one `aliases` table.**
+**GRAM-32. Write every canonical Quoll-owned structured file and [front] in [toml], and declare canonical PURL and qualified-name aliases in one `aliases` table.**
 *Stated by* [toml], [front], [workspace manifest], [modules] and [canonical toml].
 *Because* explicit scalar types and a simple table model give tools an exact edit boundary without implicit conversions, anchors or a custom configuration language, while short [manifest]s and aliases remain comfortable to read and write.
 *Because* one structured syntax serves pure [manifest]s, membership, [lock]s and [front] matter, and `+++` keeps that [front] matter distinct from the Markdown it precedes.
 *Because* one alias mapping handles PURL and qualified-name targets where [reference]s are used, with Package URL versus qualified-[reference] syntax telling the target kinds apart; an unversioned target follows ordinary version updates, while a [selector] target distinguishes simultaneously visible versions.
+*Because* a [layout.decisions] or [layout.workspace decisions] uses the same [reference]s, so its [front] admits the same `aliases` table and no implementation, inclusion or module-lead declaration.
 *Because* the boolean `"module lead" = true` marks the owning [layout.header] where no [layout.body] or default [layout.header] supplies the [lead], without making that [layout.header] a default or moving its [lead] into membership metadata.
-*Accepting* a TOML parser dependency, arrays of tables in generated [lock]s, explicit quoting, two target grammars in one alias table, and one new front-matter boolean whose cardinality is the source join's to check.
+*Accepting* a TOML parser dependency, arrays of tables in generated [lock]s, explicit quoting, two target grammars in one alias table, an aliases-only [front] on [layout.decisions] and [layout.workspace decisions], qualified-name targets within the declaring file's sight including same-package internal items, whose resolution and public exposure remain the source join's to check, and one front-matter boolean whose cardinality is the source join's to check.
 *Rejected* YAML, whose broader grammar and implicit typing need restriction and careful canonicalization; JSON, whose hand-facing forms are more verbose and comment-free; splitting TOML and JSON by file kind, which doubles parsers and serializers; comment-enabled JSON variants, whose implementations vary; separate PURL and qualified-name alias mappings, which add structure without expressive power; package-global aliases, which turn a local [reference] convenience into global naming policy; and descriptions in [modules], which duplicate the owning [lead]s and drift.
 *Formerly* the renderer's SYN-15 and SYN-27.
 
@@ -180,16 +181,16 @@
 *Because* a bare ID is then read within its own [entry] file alone, its mnemonic showing which that is (GRAM-17).
 *Formerly* the renderer's SYN-16, in part.
 
-**GRAM-25. Write the language's [core word]s bare, as words of text.**
-*Stated by* [core word] and [own terms].
+**GRAM-25. Write the language's six [core word]s bare, as words of text, in every [layout.package].**
+*Stated by* [core word] and [used].
 *Because* every [layout.package] speaks of what it is made of in the language's terms, and these six are the types every [layout.source file] of every [layout.package] speaks of, the list a newcomer learns first.
 *Because* a keyword is written bare in every language engineers read, while brackets around words every [layout.source file] uses would mark nearly every sentence.
 *Because* a word of text that reserves no name takes nothing from writers: a [layout.package]'s own `package` stays its own, written as a [reference].
 *Because* an [item]'s defining name, a heading the language names, a [label] and a link's destination each mark a [construct] or a target rather than speak of the language's terms.
-*Because* in the language's own [layout.package] the terms are its own [item]s, which is why [own terms] holds there; what a [core word] names elsewhere, and at which edition, is the meaning's (GRAM-20).
+*Because* the language's own [layout.package] follows the same six-word rule as every other, so self-definition needs no separate lexical rule; what a [core word] names, and at which edition, is the meaning's (GRAM-20).
 *Accepting* six words that, written bare in any [layout.package], are the language's terms rather than plain English; and a list this part keeps in step with the definition's terms by hand, as a language's keywords are listed in its lexical grammar.
-*Revisit* the list as the definition's terms settle.
-*Rejected* the words plain, defined nowhere a reader of the definition looks; three words alone, `package`, `module` and `interface`, leaving out types every [layout.source file] speaks of; every term the definition defines, a list this part could keep only as text in step with another's by hand; a [core word] reserving its name, which takes from every [layout.package] a name it may want; any letters after a listed word an inflection, which makes `projection` and `packaging` [core word]s; and a [core word] wherever its word stands bare, which makes an [item]'s defining name and a named heading one.
+*Revisit* the list when a concrete reading burden and an unambiguous lexical case justify an edition change.
+*Rejected* the words plain, defined nowhere a reader of the definition looks; three words alone, `package`, `module` and `interface`, leaving out types every [layout.source file] speaks of; adding `uses`, whose ordinary English senses would acquire model meaning without a demonstrated benefit; every term the definition defines, a list this part could keep only as text in step with another's by hand; a separate rule for the language's own [layout.package], which makes self-definition an exception to the lexical grammar; a [core word] reserving its name, which takes from every [layout.package] a name it may want; any letters after a listed word an inflection, which makes `projection` and `packaging` [core word]s; and a [core word] wherever its word stands bare, which makes an [item]'s defining name and a named heading one.
 
 **GRAM-26. Keep how [layout.tests] are written open until a [layout.package] has some.**
 *Stated by* [tests].
@@ -203,7 +204,7 @@
 *Accepting* that two [item]s of one [layout.body] may share a name, told apart by the `impl` line each stands under.
 *Rejected* two [item]s of one name under `impl` lines with the same [reference], as in two [view]s, which would make two [item]s carry out one.
 
-**GRAM-29. Write the root's full direct-and-transitive resolution as exact [lock] entries, with [layout.content hash]es, canonical [release tag]s and one or more resolved Git sources written by [source locator]s.**
+**GRAM-29. Write the canonical root's full direct-and-transitive resolution as exact [lock] entries, with [layout.content hash]es, canonical [release tag]s and one or more resolved Git sources written by [source locator]s.**
 *Stated by* [lock], [release tag] and [source locator].
 *Because* the exact selected [selector], full commit and [layout.package] hash fix what the root checked, while the [source locator] and matched tag or requested committish explain how to find the same source again.
 *Because* the last `@` parts location from request, and the explicit `.git` repository boundary or either GitHub owner-and-repository shorthand, host-qualified or hostless, makes the following [layout.package] path unambiguous; the examples show the same nested [layout.package] path at a branch and at a release, the hostless form equivalent to the host-qualified one.
@@ -211,3 +212,25 @@
 *Because* `1220` followed by 64 lowercase hexadecimal digits writes the SHA-256 multihash's algorithm and length around the outer dirhash digest, not a replacement for the specified summary serialization.
 *Accepting* verbose arrays of tables, transitive entries repeated across independent root [lock]s, and no [lock] entry for a workspace-local working tree substituted at head.
 *Rejected* direct entries alone recursively governed by dependency [lock]s, which prevents consumer-level reconciliation; partial [selector]s in a [lock], which leaves the selected graph unfixed; a hash in the public [manifest], which mixes resolution into declaration; machine-specific [layout.workspace] [layout.path]s in a [lock]; an unmarked repository boundary or general host probing, which makes the [layout.package] path uncertain; an untyped tag string, which admits inconsistent or non-release values; [literal] as the tag's type, which confuses Markdown text with structured tag syntax; and a tag on a development source, which has no matched [release tag] to record.
+
+**GRAM-34. Leave native and cross-profile declarations, [native overlay]s and structured [native link]s open.**
+*Stated by* [native form], [native overlay] and [native link].
+*Because* native ecosystems retain their own requirement grammars and resolvers, while canonical [manifest], [selector] and [lock] forms supply no native or mixed concrete carrier before a profile needs one.
+*Because* what structured native comments or annotations carry and mean belongs with the semantic joins that define them, so their concrete tokens and placement stay open here without transferring those meanings into grammar.
+*Accepting* profile-specific concrete carriers, with no common native comment token, overlay schema or mixed-record syntax stated before their owning semantic joins settle one.
+*Revisit* these open forms when their owning semantic joins settle their concrete carriers and meanings.
+*Rejected* stretching canonical [package id], [selector], [manifest], [source locator] or [lock] grammars into native rules; one mandatory comment token across native languages; per-profile changes to what structured [native link]s mean; and concrete native or mixed forms without a profile consumer.
+
+**GRAM-35. Leave the common [target map]'s concrete grammar open until the first derived-target implementation.**
+*Stated by* [target map].
+*Because* actual realization has one common record across profiles, while neither its concrete fields nor native locators have a consumer before that implementation.
+*Accepting* one shared form whose concrete grammar waits for the first derived-target implementation.
+*Revisit* the open form at the first derived-target implementation.
+*Rejected* per-profile [target map] grammars; treating [assembly] as the realization record; and designing native locator schemas in canonical grammar.
+
+**GRAM-36. Declare exposed names and paths in an `exposes` table in an existing [layout.header] or [layout.private header].**
+*Stated by* [front].
+*Because* an exposure belongs to the existing module whose sight covers its target, so its declaration needs no additional [layout.source file] or duplicated contract.
+*Because* one TOML mapping gives each exposed name or dotted path one exact target spelling, using the existing [reference] form and quoted dotted keys rather than another path grammar.
+*Accepting* intermediate declarations in [layout.private header]s and several paths for one target; an exposure creating no module, interface or item; no `exposes` key in a [layout.body], [layout.decisions] or [layout.workspace decisions]; the existing `includes`, `implements`, `aliases` and module-lead forms keeping their own contexts, with `includes` neither renamed nor made an exposure declaration; and target resolution, path uniqueness, sibling-name uniqueness and root reachability remaining outside this grammar.
+*Rejected* one facade [layout.header] per exposure, which creates a second contract and competes with a same-named module; and a central package exposure manifest, which separates an exposure from the module sight that authorizes it.

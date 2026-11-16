@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import textwrap
+import tomllib
 import unittest
 
 
@@ -13,9 +15,11 @@ sys.path.insert(0, str(TEST_DIR.parent / "scripts"))
 from quollcheck import (  # noqa: E402
     Finding,
     Package,
+    check_package,
     decision_lifetime_findings,
     load_package,
     prose_findings,
+    public_reading,
     semantic_findings,
 )
 
@@ -74,7 +78,7 @@ class PackageFixtures:
         root = Path(temporary.name)
         pid = f"pkg:quoll/example.com/{name}"
         dependency_files = {
-            f"{name}.h.md": "## Structure\n```\n  open    public\n```\n",
+            f"{name}.h.md": '+++\n[exposes]\ndefault = "default"\n+++\n## Structure\n```\n  open    public\n```\n',
             **(files or {}),
         }
         return self.make(dependency_files, modules=(), root=root, pid=pid)
@@ -207,33 +211,17 @@ class ResolutionCase(PackageFixtures, unittest.TestCase):
         })
         self.assert_rule(self.findings(package), "semantic.independent", 1)
 
-    def test_root_facade_precedes_module_except_default_path(self) -> None:
+    def test_named_interface_cannot_collide_with_sibling_module(self) -> None:
         package = self.make(
             {
-                "demo.h.md": """\
-                    ## Structure
-                    ```
-                      choose    [api.facade]
-                    ```
-                    """,
-                "api.h.md": """\
-                    ## Structure
-                    ```
-                      facade    public
-                    ```
-                    """,
-                "api/api.h.md": """\
-                    ## Structure
-                    ```
-                      internal    private implementation face
-                      facade      internal item with a competing public path
-                    ```
-                    """,
-                "inspect.private.h.md": "An [api.default] and [api.internal].\n",
+                "api.h.md": "## Structure\n```\n  facade    public\n```\n",
+                "api/api.h.md": "## Structure\n```\n  internal    private implementation face\n```\n",
             },
             modules=("api",),
         )
-        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+        findings = self.findings(package)
+        self.assert_rule(findings, "semantic.unique-names", 1)
+        self.assertEqual("api.h.md", findings[0].path)
 
     def test_ambiguous_default_dependency_leaf(self) -> None:
         package = self.make(
@@ -247,7 +235,7 @@ class ResolutionCase(PackageFixtures, unittest.TestCase):
 
     def test_supplied_but_undeclared_dependency_is_hidden(self) -> None:
         dependency = self.dependency("external")
-        package = self.make({"mod/mod.h.md": "An [external.open].\n"})
+        package = self.make({"mod/mod.h.md": "An [external.default.open].\n"})
         findings = self.findings(package, dependency)
         self.assert_rule(findings, "semantic.dependency", 1)
         self.assertNotIn("semantic.resolved", {finding.rule for finding in findings})
@@ -281,6 +269,849 @@ class ResolutionCase(PackageFixtures, unittest.TestCase):
                     """
             },
             dependencies=["pkg:quoll/example.com/external@v1.0.0"],
+        )
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+
+
+class ExposureCase(PackageFixtures, unittest.TestCase):
+    def natural_package(self, *, name: str = "demo", root: Path | None = None) -> Package:
+        return self.make(
+            {
+                f"{name}.h.md": """\
+                    +++
+                    [exposes]
+                    "model.kernel" = "model.kernel"
+                    short = "model.kernel"
+                    +++
+                    Root declarations.
+                    """,
+                "model/model.h.md": "Model.\n",
+                "model/kernel.h.md": "## Structure\n```\n  uses    relation\n```\n",
+            },
+            modules=("model",),
+            root=root,
+            pid=f"pkg:quoll/example.com/{name}",
+        )
+
+    @staticmethod
+    def scoped_text(text: str, exposures: tuple[str, ...]) -> str:
+        """Materialize only the exposure declarations present in a reading's scope."""
+
+        kept: list[str] = []
+        in_front = False
+        front_closed = False
+        in_exposes = False
+        for line in text.splitlines(keepends=True):
+            stripped = line.strip()
+            if stripped == "+++" and not front_closed:
+                in_front = not in_front
+                front_closed = not in_front
+                in_exposes = False
+                kept.append(line)
+                continue
+            if in_front and stripped.startswith("["):
+                in_exposes = stripped == "[exposes]"
+            if in_front and in_exposes and "=" in line:
+                try:
+                    assignment = tomllib.loads(line)
+                except tomllib.TOMLDecodeError:
+                    assignment = {}
+                if assignment and not set(assignment) & set(exposures):
+                    continue
+            kept.append(line)
+        return "".join(kept)
+
+    def rebuild_reading(
+        self,
+        package: Package,
+        reading,
+        *dependencies: Package,
+    ) -> tuple[Package, dict[str, Package]]:
+        roots = {package.id: package.root, **{dependency.id: dependency.root for dependency in dependencies}}
+        package_ids = dict.fromkeys(
+            [unit.package_id for unit in reading.units]
+            + [module.package_id for module in reading.modules]
+        )
+        rebuilt: dict[str, Package] = {}
+        for pid in package_ids:
+            temporary = tempfile.TemporaryDirectory()
+            self.extra_temporaries.append(temporary)
+            units = [unit for unit in reading.units if unit.package_id == pid]
+            files = {
+                unit.path: self.scoped_text(
+                    (roots[pid] / unit.path).read_text(encoding="utf-8"),
+                    unit.exposures,
+                )
+                for unit in units
+            }
+            modules = tuple(
+                module.path
+                for module in reading.modules
+                if module.package_id == pid
+            )
+            declarations = reading.dependencies if pid == package.id else (units[0].dependencies if units else ())
+            rebuilt[pid] = self.make(
+                files,
+                dependencies=list(declarations),
+                modules=modules,
+                defaults=False,
+                root=Path(temporary.name),
+                pid=pid,
+            )
+        return rebuilt[package.id], rebuilt
+
+    def assert_reading_rebuilds(
+        self,
+        package: Package,
+        reading,
+        *dependencies: Package,
+        expected: dict[str, list[Finding]] | None = None,
+    ) -> Package:
+        rebuilt, packages = self.rebuild_reading(package, reading, *dependencies)
+        for pid, current in packages.items():
+            declared = {selector.id for selector in current.dependencies}
+            supplied = [
+                candidate
+                for candidate in packages.values()
+                if candidate.id in declared and candidate is not current
+            ]
+            findings = self.findings(current, *supplied)
+            expected_findings = (expected or {}).get(pid, [])
+            self.assertEqual(
+                sorted(finding.key for finding in expected_findings),
+                [finding.key for finding in findings],
+                f"{pid}: {[str(finding) for finding in findings]}",
+            )
+        return rebuilt
+
+    def test_natural_shortened_and_multiple_exposures_preserve_identity(self) -> None:
+        package = self.natural_package()
+        self.write(
+            "inspect.private.h.md",
+            "Resolve [model.kernel.uses], [demo.short.uses], and [demo.model.kernel.uses].\n",
+        )
+        package = load_package(self.root)
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+        self.assertEqual(
+            ("demo.h.md", "model/kernel.h.md"),
+            public_reading(package).paths,
+        )
+
+    def test_dependency_paths_follow_only_the_same_public_exposures(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.extra_temporaries.append(temporary)
+        dependency = self.natural_package(name="external", root=Path(temporary.name))
+        package = self.make(
+            {
+                "mod/mod.h.md": "Resolve [external.model.kernel.uses], [external.short.uses], and [external.model.kernel].\n",
+            },
+            dependencies=["pkg:quoll/example.com/external@v1.0.0"],
+        )
+        self.assertEqual([], [str(finding) for finding in self.findings(package, dependency)])
+
+    def test_intermediate_reexport_is_public_only_through_root_chain(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.extra_temporaries.append(temporary)
+        dependency = self.make(
+            {
+                "external.h.md": '+++\n[exposes]\npublic = "branch.api"\n+++\nRoot.\n',
+                "branch/branch.h.md": '+++\n[exposes]\napi = "deep.api"\n+++\nBranch.\n',
+                "branch/deep/api.h.md": "## Structure\n```\n  run    contract\n```\n",
+            },
+            modules=("branch", "branch/deep"),
+            root=Path(temporary.name),
+            pid="pkg:quoll/example.com/external",
+        )
+        package = self.make(
+            {"mod/mod.h.md": "Public [external.public.run]; private [external.branch.api].\n"},
+            dependencies=["pkg:quoll/example.com/external@v1.0.0"],
+        )
+        findings = self.findings(package, dependency)
+        self.assert_rule(findings, "semantic.resolved", 1)
+        self.assertEqual("external.branch.api", findings[0].subject)
+        self.assertEqual(
+            ("branch/branch.h.md", "branch/deep/api.h.md", "external.h.md"),
+            public_reading(dependency).paths,
+        )
+
+    def test_malformed_exposure_declarations_are_diagnosed_at_front_matter(self) -> None:
+        cases = (
+            ('exposes = "api"\n', "front.type"),
+            ('[exposes]\napi = 1\n', "front.type"),
+            ('[exposes]\n"bad..path" = "default"\n', "front.exposure"),
+            ('[exposes]\napi = "[default]"\n', "front.exposure"),
+            ('[exposes]\napi.extra = "default"\n', "front.type"),
+        )
+        for front, rule in cases:
+            with self.subTest(front=front):
+                package = self.make({"demo.h.md": f"+++\n{front}+++\nRoot.\n"}, modules=())
+                self.assert_rule(package.findings, rule, 1)
+        package = self.make(
+            {
+                "demo.h.md": '+++\n[aliases]\nbad = "default"\n[exposes]\nbad = 1\n+++\nRoot.\n',
+            },
+            modules=(),
+        )
+        finding = next(finding for finding in package.findings if finding.rule == "front.type")
+        self.assertEqual(5, finding.line)
+        package = self.make(
+            {"demo.h.md": "+++\nexposes = { bad = 1 }\n+++\nRoot.\n"},
+            modules=(),
+        )
+        finding = next(finding for finding in package.findings if finding.rule == "front.type")
+        self.assertEqual(2, finding.line)
+        package = self.make(
+            {
+                "demo.h.md": "+++\n[exposes.sub]\nsub = 1\n+++\nRoot.\n",
+            },
+            modules=(),
+        )
+        finding = next(finding for finding in package.findings if finding.rule == "front.type")
+        self.assertEqual("sub", finding.subject)
+        self.assertEqual(2, finding.line)
+        for header, written in (
+            ("[exposes] # public surface", r"'bad..path'"),
+            ('["exposes"]', r'"bad..path"'),
+            ("[ exposes ] # decoded basic key", '"bad' + chr(92) + 'u002e' + chr(92) + 'u002epath"'),
+        ):
+            with self.subTest(header=header, written=written):
+                package = self.make(
+                    {
+                        "demo.h.md": (
+                            f"+++\n[aliases]\nunused = \"default\"\n{header}\n"
+                            f"{written} = \"default\"\n+++\nRoot.\n"
+                        ),
+                    },
+                    modules=(),
+                )
+                finding = next(
+                    finding
+                    for finding in package.findings
+                    if finding.rule == "front.exposure"
+                )
+                self.assertEqual("bad..path", finding.subject)
+                self.assertEqual(5, finding.line)
+        package = self.make(
+            {
+                "demo.body.md": '+++\nexposes = {}\n+++\nBody.\n',
+                "demo.decisions.md": '+++\nexposes = {}\n+++\n',
+            },
+            modules=(),
+        )
+        self.assert_rule(package.findings, "front.keys", 2)
+
+    def test_nonunique_exposures_fail_but_structural_and_public_names_stay_distinct(self) -> None:
+        package = self.make(
+            {
+                "demo.h.md": '+++\n[exposes]\nsame = "api"\n+++\nRoot.\n',
+                "other.private.h.md": '+++\n[exposes]\nsame = "api"\n+++\nOther.\n',
+                "api.h.md": "API.\n",
+            },
+            modules=(),
+        )
+        self.assert_rule(self.findings(package), "semantic.exposure-unique", 1)
+
+        (self.root / "other.private.h.md").unlink()
+        package = self.make(
+            {
+                "demo.h.md": '+++\n[exposes]\napi = "other"\n+++\nRoot.\n',
+                "api.h.md": "API.\n",
+                "other.h.md": "Other.\n",
+                "inspect.private.h.md": "Local [api]; public [demo.api].\n",
+            },
+            modules=(),
+        )
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+
+    def test_exposure_cycles_terminate_and_report_each_participant(self) -> None:
+        package = self.make(
+            {
+                "a/a.h.md": '+++\n[exposes]\nloop = "b.loop"\n+++\nA.\n',
+                "b/b.h.md": '+++\n[exposes]\nloop = "a.loop"\n+++\nB.\n',
+            },
+            modules=("a", "b"),
+        )
+        findings = self.findings(package)
+        self.assert_rule(findings, "semantic.exposure-cycle", 2)
+        self.assertEqual(
+            {"a/a.h.md", "b/b.h.md"},
+            {finding.path for finding in findings if finding.rule == "semantic.exposure-cycle"},
+        )
+
+    def test_exposure_rejects_out_of_sight_and_wrong_kind_targets(self) -> None:
+        package = self.make(
+            {
+                "demo.h.md": '+++\n[exposes]\nhidden = "a.secret"\nmodule = "mod"\nitem = "mod.api.open"\n+++\nRoot.\n',
+                "a/secret.private.h.md": "Secret.\n",
+                "mod/mod.h.md": '+++\n[exposes]\nimplementation = "hidden"\n+++\nModule.\n',
+                "mod/api.h.md": "## Structure\n```\n  open    public\n```\n",
+                "mod/mod.body.md": "## Flow\n```\n  hidden    implementation\n```\n",
+            },
+            modules=("a", "mod"),
+        )
+        findings = self.findings(package)
+        self.assert_rule(findings, "semantic.exposure-target", 4)
+        self.assertEqual(
+            {"demo.h.md", "mod/mod.h.md"},
+            {finding.path for finding in findings if finding.rule == "semantic.exposure-target"},
+        )
+
+    def test_inclusion_composes_items_without_publishing_included_interface(self) -> None:
+        dependency = self.dependency(
+            "external",
+            {
+                "external.h.md": '+++\n[exposes]\napi = "api"\n+++\nRoot.\n',
+                "api.h.md": '+++\nincludes = ["secret"]\n+++\nAPI.\n',
+                "secret.private.h.md": "## Structure\n```\n  hidden    composed\n```\n",
+            },
+        )
+        package = self.make(
+            {
+                "mod/mod.h.md": "Included [external.api.hidden]; not published [external.secret] or [external.hidden].\n",
+            },
+            dependencies=["pkg:quoll/example.com/external@v1.0.0"],
+        )
+        findings = self.findings(package, dependency)
+        self.assert_rule(findings, "semantic.resolved", 2)
+        self.assertEqual(
+            {"external.secret", "external.hidden"},
+            {finding.subject for finding in findings},
+        )
+
+    def test_recursive_closure_and_reader_collection_need_only_public_units(self) -> None:
+        package = self.make(
+            {
+                "demo.h.md": '+++\n[exposes]\na = "a"\nb = "b"\n+++\nRoot.\n',
+                "a.h.md": "## Structure\n```\n  first    [b.run]\n```\n",
+                "b.h.md": "## Structure\n```\n  run    [c.hidden]\n```\n",
+                "c.private.h.md": "## Structure\n```\n  hidden    recursive\n```\n",
+            },
+            modules=(),
+        )
+        findings = self.findings(package)
+        self.assert_rule(findings, "semantic.public-closure", 1)
+        self.assertEqual("c.hidden", findings[0].subject)
+
+        self.write(
+            "demo.h.md",
+            '+++\n[exposes]\na = "a"\nb = "b"\nc = "c"\n+++\nRoot.\n',
+        )
+        package = load_package(self.root)
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+        reading = public_reading(package)
+        self.assertEqual(("a.h.md", "b.h.md", "c.private.h.md", "demo.h.md"), reading.paths)
+        self.assertEqual(reading, public_reading(package))
+
+        self.assert_reading_rebuilds(package, reading)
+
+    def test_foreign_interface_alias_preserves_dependency_public_bounds(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.extra_temporaries.append(temporary)
+        dependency = self.make(
+            {
+                "external.h.md": '+++\n[exposes]\napi = "mod.named"\n+++\nRoot.\n',
+                "mod/mod.h.md": "## Structure\n```\n  open    private default item\n```\n",
+                "mod/named.h.md": "## Structure\n```\n  run    public\n```\n",
+                "mod/secret.private.h.md": "Private.\n",
+                "mod/deep/deep.h.md": "Nested.\n",
+            },
+            modules=("mod", "mod/deep"),
+            root=Path(temporary.name),
+            pid="pkg:quoll/example.com/external",
+        )
+        package = self.make(
+            {
+                "mod/mod.h.md": """\
+                    +++
+                    [aliases]
+                    m = "external.api"
+                    +++
+                    Public [m.run]; private [m.default], [m.secret], [m.deep.default], and [external.mod.default].
+                    """
+            },
+            dependencies=["pkg:quoll/example.com/external@v1.0.0"],
+        )
+        findings = self.findings(package, dependency)
+        self.assert_rule(findings, "semantic.resolved", 4)
+        self.assertEqual(
+            {"m.default", "m.secret", "m.deep.default", "external.mod.default"},
+            {finding.subject for finding in findings},
+        )
+        self.assertNotIn("semantic.alias-target", {finding.rule for finding in findings})
+
+    def test_composed_exposure_collision_is_rejected_without_a_reference(self) -> None:
+        package = self.make(
+            {
+                "demo.h.md": '+++\n[exposes]\na = "m.x"\n"a.x" = "m.one"\n+++\nRoot.\n',
+                "m/m.h.md": '+++\n[exposes]\nx = "two"\n+++\nModule.\n',
+                "m/one.h.md": "One.\n",
+                "m/two.h.md": "## Structure\n```\n  x    composed item\n```\n",
+            },
+            modules=("m",),
+        )
+        findings = self.findings(package)
+        self.assert_rule(findings, "semantic.exposure-unique", 2)
+        self.assertTrue(
+            all("composed exposure path a.x" in finding.detail for finding in findings)
+        )
+
+    def test_interface_item_collision_is_rejected_without_a_reference(self) -> None:
+        package = self.make(
+            {
+                "demo.h.md": '+++\n[exposes]\na = "api"\n"a.x" = "other"\n+++\nRoot.\n',
+                "api.h.md": '+++\nincludes = ["composed"]\n+++\nAPI.\n',
+                "composed.private.h.md": "## Structure\n```\n  x    composed item\n```\n",
+                "other.h.md": "Other.\n",
+                "inspect.private.h.md": '+++\n[aliases]\nitem = "api.x"\n+++\nAn item remains terminal at [item.more].\n',
+            },
+            modules=(),
+        )
+        findings = self.findings(package)
+        collisions = [
+            finding
+            for finding in findings
+            if finding.rule == "semantic.exposure-unique"
+            and "composed exposure path a.x" in finding.detail
+        ]
+        self.assertEqual(2, len(collisions), [str(finding) for finding in findings])
+        self.assert_rule(findings, "semantic.reference-form", 1)
+        self.assertEqual(
+            "item.more",
+            next(
+                finding.subject
+                for finding in findings
+                if finding.rule == "semantic.reference-form"
+            ),
+        )
+
+    def test_default_interface_items_collide_under_shortened_exposure_aliases(self) -> None:
+        package = self.make(
+            {
+                "demo.h.md": '+++\n[exposes]\nx = "m.default"\n"x.path" = "other"\n+++\nRoot.\n',
+                "m/m.h.md": '+++\nincludes = ["composed"]\n+++\nModule.\n',
+                "m/composed.private.h.md": "## Structure\n```\n  path    included default item\n```\n",
+                "other.h.md": "Other.\n",
+                "inspect.private.h.md": "Structural [m.default.path] remains forbidden.\n",
+            },
+            modules=("m",),
+        )
+        findings = self.findings(package)
+        collisions = [
+            finding
+            for finding in findings
+            if finding.rule == "semantic.exposure-unique"
+            and "composed exposure path x.path" in finding.detail
+        ]
+        self.assertEqual(2, len(collisions), [str(finding) for finding in findings])
+        self.assert_rule(findings, "semantic.reference-form", 1)
+        self.assertEqual(
+            "m.default.path",
+            next(
+                finding.subject
+                for finding in findings
+                if finding.rule == "semantic.reference-form"
+            ),
+        )
+
+    def test_unrelated_modules_may_reuse_exposure_and_item_suffixes(self) -> None:
+        package = self.make(
+            {
+                "one/one.h.md": '+++\n[exposes]\na = "api"\n+++\nOne.\n',
+                "one/api.h.md": "## Structure\n```\n  x    first module item\n```\n",
+                "two/two.h.md": '+++\n[exposes]\n"a.x" = "other"\n+++\nTwo.\n',
+                "two/other.h.md": "Second module interface.\n",
+            },
+            modules=("one", "two"),
+        )
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+
+    def test_public_closure_accepts_dependency_package_and_public_target(self) -> None:
+        dependency = self.dependency("external")
+        package = self.make(
+            {
+                "demo.h.md": '+++\n[exposes]\napi = "api"\n+++\nRoot.\n',
+                "api.h.md": "Whole [external].\n## Structure\n```\n  open    [external.default.open]\n```\n",
+            },
+            dependencies=["pkg:quoll/example.com/external@v1.0.0"],
+        )
+        self.assertEqual([], [str(finding) for finding in self.findings(package, dependency)])
+        self.assertEqual(
+            ("pkg:quoll/example.com/external@v1.0.0",),
+            public_reading(package, (dependency,)).dependencies,
+        )
+
+    def test_whole_file_and_empty_inclusion_closure_rebuild(self) -> None:
+        package = self.make(
+            {
+                "demo.h.md": '+++\n[exposes]\napi = "api"\nhelper = "helper"\n+++\nDeclaration holder [helper.hidden].\n',
+                "api.h.md": '+++\nincludes = ["empty"]\n+++\nExposed-item lead [helper.hidden].\n## Structure\n```\n  open      public\n  sibling   [helper.hidden]\n```\n',
+                "empty.private.h.md": "Included empty lead [helper.hidden].\n",
+                "helper.h.md": "## Structure\n```\n  hidden    public target\n```\n",
+            },
+            modules=(),
+        )
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+        reading = public_reading(package)
+        self.assertEqual(
+            ("api.h.md", "demo.h.md", "empty.private.h.md", "helper.h.md"),
+            reading.paths,
+        )
+        self.assert_reading_rebuilds(package, reading)
+
+    def test_declaration_and_same_file_references_require_exposure(self) -> None:
+        package = self.make(
+            {
+                "demo.h.md": """\
+                    +++
+                    [exposes]
+                    a = "a"
+                    +++
+                    Declaration-only [helper.hidden] and same-file [purpose].
+                    ## Structure
+                    ```
+                      purpose    private declaration-holder item
+                    ```
+                    """,
+                "a.h.md": "Exposed interface.\n",
+                "helper.h.md": "## Structure\n```\n  hidden    cross-file target\n```\n",
+            },
+            modules=(),
+        )
+        findings = self.findings(package)
+        self.assert_rule(findings, "semantic.public-closure", 2)
+        closures = [
+            finding for finding in findings if finding.rule == "semantic.public-closure"
+        ]
+        self.assertEqual(
+            {("demo.h.md", "helper.hidden"), ("demo.h.md", "purpose")},
+            {(closure.path, closure.subject) for closure in closures},
+        )
+        self.assertEqual(("a.h.md", "demo.h.md"), public_reading(package).paths)
+
+        self.write(
+            "demo.h.md",
+            """\
+            +++
+            [exposes]
+            default = "default"
+            a = "a"
+            helper = "helper"
+            +++
+            Declaration-only [helper.hidden] and same-file [purpose].
+            ## Structure
+            ```
+              purpose    private declaration-holder item
+            ```
+            """,
+        )
+        package = load_package(self.root)
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+        reading = public_reading(package)
+        self.assertEqual(("a.h.md", "demo.h.md", "helper.h.md"), reading.paths)
+        self.assert_reading_rebuilds(package, reading)
+
+    def test_supplied_dependency_findings_are_not_discarded(self) -> None:
+        dependency = self.dependency(
+            "external",
+            {
+                "external.h.md": '+++\n[exposes]\ndefault = "default"\n+++\n## Structure\n```\n  open    [missing]\n```\n',
+            },
+        )
+        package = self.make({"mod/mod.h.md": "Local only.\n"})
+        findings = self.findings(package, dependency)
+        self.assert_rule(findings, "semantic.resolved", 1)
+        finding = next(finding for finding in findings if finding.rule == "semantic.resolved")
+        self.assertEqual(("external.h.md", "missing"), (finding.path, finding.subject))
+
+    def test_identical_foreign_findings_keep_package_owners(self) -> None:
+        first = self.dependency("first", {"api.h.md": "A [missing].\n"})
+        second = self.dependency("second", {"api.h.md": "A [missing].\n"})
+        package = self.make(
+            {"mod/mod.h.md": "Local only.\n"},
+            dependencies=[
+                "pkg:quoll/example.com/first@v1.0.0",
+                "pkg:quoll/example.com/second@v1.0.0",
+            ],
+        )
+        findings = self.findings(package, first, second)
+        unresolved = [finding for finding in findings if finding.rule == "semantic.resolved"]
+        self.assertEqual(2, len(unresolved), [str(finding) for finding in findings])
+        self.assertEqual({first.id, second.id}, {finding.package_id for finding in unresolved})
+        self.assertEqual({"api.h.md"}, {finding.path for finding in unresolved})
+        for finding in unresolved:
+            self.assertIn(finding.package_id, str(finding))
+
+    def test_baseline_filter_preserves_other_package_identical_finding(self) -> None:
+        first = self.dependency("first", {"api.h.md": "A [missing].\n"})
+        second = self.dependency("second", {"api.h.md": "A [missing].\n"})
+        valid_second = self.dependency("second")
+        dependencies = [
+            "pkg:quoll/example.com/first@v1.0.0",
+            "pkg:quoll/example.com/second@v1.0.0",
+        ]
+        package = self.make({"mod/mod.h.md": "Local only.\n"}, dependencies=dependencies)
+        baseline_root = tempfile.TemporaryDirectory()
+        self.extra_temporaries.append(baseline_root)
+        baseline = self.make(
+            {"mod/mod.h.md": "Local only.\n"},
+            dependencies=dependencies,
+            root=Path(baseline_root.name),
+        )
+        findings = check_package(
+            package,
+            baseline,
+            (first, second),
+            baseline_dependency_packages=(first, valid_second),
+        )
+        self.assertEqual(1, len(findings), [str(finding) for finding in findings])
+        self.assertEqual(second.id, findings[0].package_id)
+        self.assertEqual("semantic.resolved", findings[0].rule)
+
+    def test_foreign_reexport_units_keep_owner_identity_and_rebuild(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.extra_temporaries.append(temporary)
+        dependency = self.make(
+            {
+                "external.h.md": '+++\n[exposes]\napi = "api"\n+++\nRoot.\n',
+                "api.h.md": "## Structure\n```\n  run    foreign\n```\n",
+            },
+            modules=(),
+            root=Path(temporary.name),
+            pid="pkg:quoll/example.com/external",
+        )
+        package = self.make(
+            {
+                "demo.h.md": '+++\n[exposes]\nreexported = "external.api"\nlocal = "api"\n+++\nHolder [external.api.run].\n',
+                "api.h.md": "## Structure\n```\n  run    local\n```\n",
+            },
+            modules=(),
+            dependencies=["pkg:quoll/example.com/external@v1.0.0"],
+        )
+        self.assertEqual([], [str(finding) for finding in self.findings(package, dependency)])
+        reading = public_reading(package, (dependency,))
+        self.assertEqual(2, reading.paths.count("api.h.md"))
+        self.assertEqual(len(reading.units), len(set(reading.identities)))
+        self.assertEqual(len(reading.units), len({unit.locator for unit in reading.units}))
+        self.assertEqual(reading, public_reading(package, (dependency,)))
+        self.assert_reading_rebuilds(package, reading, dependency)
+
+    def test_foreign_closure_excludes_unrelated_public_interfaces(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.extra_temporaries.append(temporary)
+        dependency = self.make(
+            {
+                "external.h.md": '+++\n[exposes]\napi = "api"\nhelper = "helper"\nunrelated = "unrelated"\nother = "other"\n+++\nRoot.\n',
+                "api.h.md": "## Structure\n```\n  run    [helper.run]\n```\n",
+                "helper.h.md": "## Structure\n```\n  run    required transitive contract\n```\n",
+                "unrelated.h.md": "## Structure\n```\n  entry    [other.run]\n```\n",
+                "other.h.md": "## Structure\n```\n  run    unrelated transitive contract\n```\n",
+            },
+            modules=(),
+            root=Path(temporary.name),
+            pid="pkg:quoll/example.com/external",
+        )
+        for mode in ("reexport", "reference", "inclusion"):
+            with self.subTest(mode=mode):
+                current_root = tempfile.TemporaryDirectory()
+                self.extra_temporaries.append(current_root)
+                files = {
+                    "demo.h.md": '+++\n[exposes]\nselected = "external.api"\n+++\nRoot.\n',
+                }
+                if mode != "reexport":
+                    files["demo.h.md"] = '+++\n[exposes]\nselected = "local"\n+++\nRoot.\n'
+                    files["local.h.md"] = (
+                        '+++\nincludes = ["external.api"]\n+++\nLocal.\n'
+                        if mode == "inclusion"
+                        else "## Structure\n```\n  open    [external.api.run]\n```\n"
+                    )
+                package = self.make(
+                    files,
+                    modules=(),
+                    root=Path(current_root.name),
+                    dependencies=["pkg:quoll/example.com/external@v1.0.0"],
+                )
+                self.assertEqual(
+                    [],
+                    [str(finding) for finding in self.findings(package, dependency)],
+                )
+                reading = public_reading(package, (dependency,))
+                foreign_paths = {
+                    unit.path
+                    for unit in reading.units
+                    if unit.package_id == dependency.id
+                }
+                self.assertEqual({"api.h.md", "external.h.md", "helper.h.md"}, foreign_paths)
+                foreign_root = next(
+                    unit
+                    for unit in reading.units
+                    if unit.package_id == dependency.id and unit.path == "external.h.md"
+                )
+                self.assertEqual(("api", "helper"), foreign_root.exposures)
+                self.assertNotIn("unrelated.h.md", reading.paths)
+                self.assertNotIn("other.h.md", reading.paths)
+                self.assert_reading_rebuilds(package, reading, dependency)
+
+    def test_transitive_foreign_reexport_and_inclusion_rebuild_complete_readings(self) -> None:
+        for mode in ("reexport", "inclusion"):
+            with self.subTest(mode=mode):
+                roots = []
+                for _name in ("a", "b", "c"):
+                    temporary = tempfile.TemporaryDirectory()
+                    self.extra_temporaries.append(temporary)
+                    roots.append(Path(temporary.name))
+                a_root, b_root, c_root = roots
+                c = self.make(
+                    {
+                        "c.h.md": '+++\n[exposes]\napi = "api"\n+++\nC root.\n',
+                        "api.h.md": "## Structure\n```\n  run    C contract\n```\n",
+                    },
+                    modules=(),
+                    root=c_root,
+                    pid="pkg:quoll/example.com/c",
+                )
+                b_files = {
+                    "b.h.md": '+++\n[exposes]\napi = "c.api"\n+++\nB root.\n',
+                }
+                if mode == "inclusion":
+                    b_files = {
+                        "b.h.md": '+++\n[exposes]\nlocal = "local"\n+++\nB root.\n',
+                        "local.h.md": '+++\nincludes = ["c.api"]\n+++\nB inclusion.\n',
+                    }
+                b = self.make(
+                    b_files,
+                    modules=(),
+                    root=b_root,
+                    pid="pkg:quoll/example.com/b",
+                    dependencies=["pkg:quoll/example.com/c@v1.0.0"],
+                )
+                b_path = "api" if mode == "reexport" else "local"
+                a = self.make(
+                    {
+                        "a.h.md": '+++\n[exposes]\nlocal = "api"\n+++\nA root.\n',
+                        "api.h.md": f"## Structure\n```\n  open    [b.{b_path}.run]\n```\n",
+                    },
+                    modules=(),
+                    root=a_root,
+                    pid="pkg:quoll/example.com/a",
+                    dependencies=[
+                        "pkg:quoll/example.com/b@v1.0.0",
+                        "pkg:quoll/example.com/c@v1.0.0",
+                    ],
+                )
+                self.assertEqual(
+                    [], [str(finding) for finding in self.findings(a, b, c)]
+                )
+                reading = public_reading(a, (b, c))
+                expected_paths = {
+                    a.id: {"a.h.md", "api.h.md"},
+                    b.id: {"b.h.md"} | ({"local.h.md"} if mode == "inclusion" else set()),
+                    c.id: {"c.h.md", "api.h.md"},
+                }
+                for pid, paths in expected_paths.items():
+                    self.assertEqual(
+                        paths,
+                        {unit.path for unit in reading.units if unit.package_id == pid},
+                    )
+                self.assertEqual(
+                    ("local",),
+                    next(unit.exposures for unit in reading.units if unit.identity == f"{a.id}:source:a.h.md"),
+                )
+                self.assertEqual(
+                    (b_path,),
+                    next(unit.exposures for unit in reading.units if unit.identity == f"{b.id}:source:b.h.md"),
+                )
+                self.assertEqual(
+                    ("api",),
+                    next(unit.exposures for unit in reading.units if unit.identity == f"{c.id}:source:c.h.md"),
+                )
+                self.assert_reading_rebuilds(a, reading, b, c)
+
+    def test_foreign_rebuild_asserts_findings_outside_resolution_allowlist(self) -> None:
+        dependency = self.dependency(
+            "external",
+            {
+                "external.h.md": '+++\n[exposes]\napi = "api"\n+++\nRoot.\n',
+                "api.h.md": "## Structure\n```\n  duplicate    first\n  duplicate    second\n```\n",
+            },
+        )
+        package = self.make(
+            {
+                "demo.h.md": '+++\n[exposes]\nselected = "external.api"\n+++\nRoot.\n',
+            },
+            modules=(),
+            dependencies=["pkg:quoll/example.com/external@v1.0.0"],
+        )
+        reading = public_reading(package, (dependency,))
+        with self.assertRaises(AssertionError) as caught:
+            self.assert_reading_rebuilds(package, reading, dependency)
+        self.assertIn("semantic.unique-names", str(caught.exception))
+
+    def test_root_default_can_hold_interface_exposure_without_becoming_public(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.extra_temporaries.append(temporary)
+        dependency = self.make(
+            {"std.h.md": '+++\n[exposes]\nfs = "fs.default"\n+++\nStandard library.\n'},
+            modules=("fs",),
+            root=Path(temporary.name),
+            pid="pkg:quoll/example.com/std",
+        )
+        reading = public_reading(dependency)
+        self.assertEqual(("fs/fs.h.md", "std.h.md"), reading.paths)
+        self.assertEqual(("fs",), tuple(module.path for module in reading.modules))
+        rebuilt_std = self.assert_reading_rebuilds(dependency, reading)
+        package = self.make(
+            {"mod/mod.h.md": "Public [std.fs]; not recursive [std.fs.default] or [std.default].\n"},
+            dependencies=["pkg:quoll/example.com/std@v1.0.0"],
+        )
+        findings = self.findings(package, rebuilt_std)
+        self.assert_rule(findings, "semantic.resolved", 2)
+        self.assertEqual({"std.fs.default", "std.default"}, {finding.subject for finding in findings})
+
+    def test_default_interface_alias_coexists_with_private_module_and_unexposed_root(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.extra_temporaries.append(temporary)
+        dependency = self.make(
+            {
+                "std.h.md": """\
+                    +++
+                    [exposes]
+                    fs = "fs.default"
+                    copy = "std.fs"
+                    +++
+                    The unexposed root default holds only exposure declarations.
+                    """,
+                "std.body.md": "Local [fs] and [fs.path]; public [std.fs] and [std.fs.path].\n",
+                "fs/fs.h.md": "The carrying module is identified without exposing descendants.\n## Structure\n```\n  path    public file-system path\n```\n",
+            },
+            modules=("fs",),
+            root=Path(temporary.name),
+            pid="pkg:quoll/example.com/std",
+        )
+        self.assertEqual([], [str(finding) for finding in self.findings(dependency)])
+        reading = public_reading(dependency)
+        self.assertEqual(("fs/fs.h.md", "std.h.md"), reading.paths)
+        rebuilt_std = self.assert_reading_rebuilds(dependency, reading)
+        package = self.make(
+            {
+                "mod/mod.h.md": '+++\nincludes = ["std.fs"]\n+++\nPublic [std.fs.path]; not structural [std.fs.default] or [std.default].\n',
+            },
+            dependencies=["pkg:quoll/example.com/std@v1.0.0"],
+        )
+        findings = self.findings(package, rebuilt_std)
+        self.assert_rule(findings, "semantic.resolved", 2)
+        self.assertEqual({"std.fs.default", "std.default"}, {finding.subject for finding in findings})
+        self.assertNotIn("semantic.exposure-unique", {finding.rule for finding in findings})
+        self.assertNotIn("semantic.ambiguous", {finding.rule for finding in findings})
+
+    def test_same_spelled_module_does_not_hide_an_unrelated_exposure_target(self) -> None:
+        package = self.make(
+            {
+                "demo.h.md": '+++\n[exposes]\nfs = "other"\n+++\nRoot.\n',
+                "fs/fs.h.md": "Private structural module.\n",
+                "other.h.md": "Unrelated exposed interface.\n",
+                "inspect.private.h.md": "The local [fs] module and public [demo.fs] interface are distinct.\n",
+            },
+            modules=("fs",),
         )
         self.assertEqual([], [str(finding) for finding in self.findings(package)])
 
@@ -371,12 +1202,12 @@ class RelationCase(PackageFixtures, unittest.TestCase):
 
     def test_qualified_dependency_default_item_collision_is_ambiguous(self) -> None:
         dependency = self.dependency("external", {
-            "external.h.md": '+++\nincludes = ["one", "two"]\n+++\nPublic.\n',
+            "external.h.md": '+++\nincludes = ["one", "two"]\n[exposes]\ndefault = "default"\n+++\nPublic.\n',
             "one.h.md": "## Structure\n```\n  thing    one\n```\n",
             "two.h.md": "## Structure\n```\n  thing    two\n```\n",
         })
         package = self.make(
-            {"mod/mod.h.md": "An [external.thing].\n"},
+            {"mod/mod.h.md": "An [external.default.thing].\n"},
             dependencies=["pkg:quoll/example.com/external@v1.0.0"],
         )
         self.assert_rule(self.findings(package, dependency), "semantic.ambiguous", 1)
@@ -481,8 +1312,9 @@ class UseAndClosureCase(PackageFixtures, unittest.TestCase):
         )
         self.assertEqual([], [str(finding) for finding in self.findings(package)])
 
-    def test_recursive_public_closure_reports_facade_and_included_sources(self) -> None:
+    def test_recursive_public_closure_reports_exposed_and_included_sources(self) -> None:
         package = self.make({
+            "demo.h.md": '+++\n[exposes]\napi = "api"\n+++\nRoot declarations.\n',
             "api.h.md": """\
                 +++
                 includes = ["mod.default"]
@@ -511,17 +1343,20 @@ class UseAndClosureCase(PackageFixtures, unittest.TestCase):
     def test_dependency_public_item_satisfies_public_closure(self) -> None:
         dependency = self.dependency("external")
         package = self.make(
-            {"api.h.md": "## Structure\n```\n  open    [external.open]\n```\n"},
+            {
+                "demo.h.md": '+++\n[exposes]\napi = "api"\n+++\nRoot.\n',
+                "api.h.md": "## Structure\n```\n  open    [external.default.open]\n```\n",
+            },
             dependencies=["pkg:quoll/example.com/external@v1.0.0"],
         )
         self.assertEqual([], [str(finding) for finding in self.findings(package, dependency)])
     def test_dependency_included_item_satisfies_public_closure(self) -> None:
         dependency = self.dependency("external", {
-            "external.h.md": '+++\nincludes = ["secret"]\n+++\nPublic.\n',
+            "external.h.md": '+++\nincludes = ["secret"]\n[exposes]\ndefault = "default"\n+++\nPublic.\n',
             "secret.private.h.md": "## Structure\n```\n  hidden    exposed by inclusion\n```\n",
         })
         package = self.make(
-            {"api.h.md": "## Structure\n```\n  open    [external.hidden]\n```\n"},
+            {"api.h.md": "## Structure\n```\n  open    [external.default.hidden]\n```\n"},
             dependencies=["pkg:quoll/example.com/external@v1.0.0"],
         )
         self.assertEqual([], [str(finding) for finding in self.findings(package, dependency)])
@@ -592,6 +1427,7 @@ class AliasCase(PackageFixtures, unittest.TestCase):
 
     def test_dependency_interface_item_aliases_and_landing(self) -> None:
         dependency = self.dependency("external", {
+            "external.h.md": '+++\n[exposes]\ndefault = "default"\napi = "api"\n+++\nPublic.\n## Structure\n```\n  open    public\n```\n',
             "api.h.md": "## Structure\n```\n  run    contract\n```\n",
         })
         package = self.make(
@@ -601,9 +1437,9 @@ class AliasCase(PackageFixtures, unittest.TestCase):
                     [aliases]
                     dep = "pkg:quoll/example.com/external@v1.0.0"
                     api = "dep.api"
-                    open = "dep.open"
+                    open = "dep.default.open"
                     +++
-                    Land on [dep], [dep.default], [dep.api], [dep.api.run], [dep.open], [api.run], and [open].
+                    Land on [dep], [dep.default], [dep.api], [dep.api.run], [dep.default.open], [api.run], and [open].
                     """
             },
             dependencies=["pkg:quoll/example.com/external@v1.0.0"],
@@ -618,10 +1454,10 @@ class AliasCase(PackageFixtures, unittest.TestCase):
                     +++
                     [aliases]
                     dep = "pkg:quoll/example.com/external@v1.0.0"
-                    open = "dep.open"
+                    open = "dep.default.open"
                     bad = "open.more"
                     +++
-                    Invalid [dep.default.open] and [open.more].
+                    Invalid [dep.default.open.more] and [open.more].
                     """
             },
             dependencies=["pkg:quoll/example.com/external@v1.0.0"],
@@ -685,6 +1521,40 @@ class AliasCase(PackageFixtures, unittest.TestCase):
         )
         self.assert_rule(self.findings(package), "semantic.alias-target", 1)
 
+    def test_interface_alias_cannot_use_forbidden_body_item_fallback(self) -> None:
+        package = self.make({
+            "mod/mod.h.md": """\
+                +++
+                [aliases]
+                bad = "hidden"
+                +++
+                Module.
+                """,
+            "mod/mod.body.md": """\
+                +++
+                [aliases]
+                implementation = "hidden"
+                +++
+                ## Flow
+                ```
+                  hidden    implementation
+                ```
+                """,
+            "mod/mod.decisions.md": """\
+                +++
+                [aliases]
+                implementation = "hidden"
+                +++
+                **D-1. Body item alias**
+                *Stated by* [implementation]
+                """,
+        })
+        findings = self.findings(package)
+        self.assert_rule(findings, "semantic.alias-target", 1)
+        finding = next(finding for finding in findings if finding.rule == "semantic.alias-target")
+        self.assertEqual("mod/mod.h.md", finding.path)
+        self.assertEqual("bad", finding.subject)
+
     def test_unused_qualified_alias_rejects_same_leaf_wrong_package_id(self) -> None:
         files = {
             "mod/mod.body.md": '+++\n[aliases]\napi = "demo.default"\n+++\nUnused alias.\n',
@@ -704,6 +1574,275 @@ class AliasCase(PackageFixtures, unittest.TestCase):
         correct = self.dependency("demo")
         package = self.make(files, dependencies=dependencies)
         self.assertEqual([], [str(finding) for finding in self.findings(package, correct)])
+
+    def test_same_package_module_interface_and_item_aliases_in_body_and_decisions(self) -> None:
+        package = self.make(
+            {
+                "demo.body.md": """\
+                    +++
+                    [aliases]
+                    model_alias = "model"
+                    kernel = "model.kernel"
+                    uses = "model.kernel.uses"
+                    short = "uses"
+                    +++
+                    Resolve [model_alias.kernel.uses], [kernel.uses], [uses], and [short].
+                    """,
+                "demo.decisions.md": """\
+                    +++
+                    [aliases]
+                    uses = "model.kernel.uses"
+                    +++
+                    **D-1. Local alias**
+                    *Stated by* [uses]
+                    """,
+                "model/model.h.md": "Model.\n",
+                "model/kernel.h.md": "## Structure\n```\n  uses    relation\n```\n",
+            },
+            modules=("model",),
+        )
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+
+    def test_decision_front_matter_accepts_only_aliases(self) -> None:
+        package = self.make({
+            "mod/mod.h.md": "## Structure\n```\n  thing    meaning\n```\n",
+            "mod/mod.decisions.md": """\
+                +++
+                includes = ["default"]
+                [aliases]
+                thing = "default.thing"
+                +++
+                **D-1. Decision alias**
+                *Stated by* [thing]
+                """,
+        })
+        self.assert_rule(package.findings, "front.keys", 1)
+        self.assertNotIn("semantic.alias-target", {finding.rule for finding in self.findings(package)})
+
+    def test_aliases_remain_file_local(self) -> None:
+        package = self.make(
+            {
+                "a/a.h.md": '+++\n[aliases]\nthing = "default.local"\n+++\nA [thing].\n## Structure\n```\n  local    meaning\n```\n',
+                "b/b.h.md": "B [thing].\n",
+            },
+            modules=("a", "b"),
+        )
+        findings = self.findings(package)
+        self.assert_rule(findings, "semantic.resolved", 1)
+        self.assertEqual("b/b.h.md", next(finding.path for finding in findings if finding.rule == "semantic.resolved"))
+
+    def test_same_package_item_alias_is_terminal(self) -> None:
+        package = self.make(
+            {
+                "mod/mod.h.md": """\
+                    +++
+                    [aliases]
+                    uses = "api.uses"
+                    +++
+                    Invalid [uses.more].
+                    """,
+                "mod/api.h.md": "## Structure\n```\n  uses    relation\n```\n",
+            },
+        )
+        self.assert_rule(self.findings(package), "semantic.reference-form", 1)
+
+    def test_alias_cycle_reports_participants_but_not_an_acyclic_prefix(self) -> None:
+        package = self.make({
+            "mod/mod.body.md": """\
+                +++
+                [aliases]
+                prefix = "a.api"
+                a = "b.api"
+                b = "c.api"
+                c = "b.api"
+                +++
+                Body.
+                """
+        })
+        findings = self.findings(package)
+        self.assert_rule(findings, "semantic.alias-cycle", 2)
+        self.assertEqual(
+            {"b", "c"},
+            {finding.subject for finding in findings if finding.rule == "semantic.alias-cycle"},
+        )
+
+    def test_alias_collision_with_visible_dependency(self) -> None:
+        package = self.make(
+            {
+                "mod/mod.body.md": '+++\n[aliases]\nexternal = "pkg:quoll/example.com/external@v1.0.0"\n+++\nBody.\n',
+            },
+            dependencies=["pkg:quoll/example.com/external@v1.0.0"],
+        )
+        self.assert_rule(self.findings(package), "semantic.alias-unique", 1)
+
+    def test_public_closure_uses_alias_target_identity(self) -> None:
+        dependency = self.dependency("external")
+        package = self.make(
+            {
+                "demo.h.md": '+++\n[exposes]\napi = "api"\n+++\nRoot.\n',
+                "api.h.md": """\
+                    +++
+                    [aliases]
+                    open = "external.default.open"
+                    hidden = "mod.internal.escape"
+                    +++
+                    Public [open] but private [hidden].
+                    """,
+                "mod/mod.h.md": "Module.\n",
+                "mod/internal.h.md": "## Structure\n```\n  escape    hidden\n```\n",
+            },
+            dependencies=["pkg:quoll/example.com/external@v1.0.0"],
+        )
+        findings = self.findings(package, dependency)
+        self.assert_rule(findings, "semantic.public-closure", 1)
+        self.assertEqual("hidden", next(finding.subject for finding in findings if finding.rule == "semantic.public-closure"))
+
+    def workspace(self, decisions: str) -> Package:
+        self.write(
+            "workspace.quoll.toml",
+            'packages = ["member"]\ndescription = "Workspace."\n',
+        )
+        self.write("workspace.decisions.md", decisions)
+        self.make(
+            {
+                "member.h.md": '+++\n[exposes]\ndefault = "default"\napi = "api"\n+++\n## Structure\n```\n  open    public\n```\n',
+                "api.h.md": "## Structure\n```\n  run    public\n  public surface    public\n```\n",
+                "secret.private.h.md": "## Structure\n```\n  hidden    private\n```\n",
+                "internal/internal.h.md": "## Structure\n```\n  hidden    internal\n```\n",
+            },
+            modules=("internal",),
+            root=self.root / "member",
+            pid="pkg:quoll/example.com/member",
+        )
+        return load_package(self.root)
+
+    def test_workspace_decision_aliases_use_member_public_roots(self) -> None:
+        package = self.workspace("""\
+            +++
+            [aliases]
+            member_alias = "member"
+            open = "member.default.open"
+            api = "member.api"
+            by_id = "pkg:quoll/example.com/member.api.run"
+            by_id_multiword = "pkg:quoll/example.com/member.api.public surface"
+            +++
+            **W-1. Public member aliases**
+            *Because* [member_alias.api.run], [open], [api.run], [by_id], and [by_id_multiword] are public.
+            """)
+        self.assertEqual([], [str(finding) for finding in package.findings if finding.rule == "front.alias"])
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+
+    def test_workspace_decision_aliases_do_not_add_member_sight(self) -> None:
+        package = self.workspace("""\
+            +++
+            [aliases]
+            internal = "member.internal.hidden"
+            private = "member.secret.hidden"
+            +++
+            **W-1. Bounded member sight**
+            *Because* [member.internal.hidden] and [member.secret.hidden] are not public roots.
+            """)
+        findings = self.findings(package)
+        self.assert_rule(findings, "semantic.alias-target", 2)
+        self.assert_rule(findings, "semantic.resolved", 2)
+
+    def test_workspace_alias_collides_with_member_name(self) -> None:
+        package = self.workspace("""\
+            +++
+            [aliases]
+            member = "member.default.open"
+            +++
+            **W-1. Member collision**
+            *Because* The local spelling collides.
+            """)
+        self.assert_rule(self.findings(package), "semantic.alias-unique", 1)
+
+    def test_workspace_interface_alias_keeps_member_public_bounds(self) -> None:
+        self.write(
+            "workspace.quoll.toml",
+            'packages = ["member"]\ndescription = "Workspace."\n',
+        )
+        self.write(
+            "workspace.decisions.md",
+            """\
+            +++
+            [aliases]
+            m = "member.api"
+            +++
+            **W-1. Exposed member interface**
+            *Because* [m.run] is public while [m.default], [m.secret], and [m.deep.default] are bounded.
+            """,
+        )
+        self.make(
+            {
+                "member.h.md": '+++\n[exposes]\napi = "mod.named"\n+++\nMember.\n',
+                "mod/mod.h.md": "Module.\n",
+                "mod/named.h.md": "## Structure\n```\n  run    public\n```\n",
+                "mod/secret.private.h.md": "Private.\n",
+                "mod/deep/deep.h.md": "Nested.\n",
+            },
+            modules=("mod", "mod/deep"),
+            root=self.root / "member",
+            pid="pkg:quoll/example.com/member",
+        )
+        findings = self.findings(load_package(self.root))
+        self.assert_rule(findings, "semantic.resolved", 3)
+        self.assertEqual(
+            {"m.default", "m.secret", "m.deep.default"},
+            {finding.subject for finding in findings},
+        )
+        self.assertNotIn("semantic.alias-target", {finding.rule for finding in findings})
+
+    def test_workspace_discovery_prunes_only_declared_member_roots(self) -> None:
+        self.write(
+            "workspace.quoll.toml",
+            'packages = ["packages/member"]\ndescription = "Workspace."\n',
+        )
+        self.make(
+            {"member.h.md": "Member.\n"},
+            modules=(),
+            root=self.root / "packages/member",
+            pid="pkg:quoll/example.com/member",
+        )
+        self.write("packages/other/other.h.md", "A [missing].\n")
+        package = load_package(self.root)
+        placements = [finding for finding in package.findings if finding.rule == "source.placement"]
+        self.assertEqual(["packages/other/other.h.md"], [finding.path for finding in placements])
+        findings = self.findings(package)
+        self.assert_rule(findings, "semantic.resolved", 1)
+        self.assertEqual(
+            "packages/other/other.h.md",
+            next(finding.path for finding in findings if finding.rule == "semantic.resolved"),
+        )
+
+    def test_current_and_baseline_keep_the_same_undeclared_sibling_package(self) -> None:
+        current_root = self.root / "current"
+        baseline_root = self.root / "baseline"
+        self.write(
+            "workspace.quoll.toml",
+            'packages = ["member"]\ndescription = "Workspace."\n',
+            current_root,
+        )
+        self.make(
+            {"member.h.md": "Member.\n"},
+            modules=(),
+            root=current_root / "member",
+            pid="pkg:quoll/example.com/member",
+        )
+        self.make(
+            {"other.h.md": "Undeclared sibling.\n"},
+            modules=(),
+            root=current_root / "other",
+            pid="pkg:quoll/example.com/other",
+        )
+        shutil.copytree(current_root, baseline_root)
+        current = load_package(current_root)
+        baseline = load_package(baseline_root, baseline=True)
+        current_places = [finding.path for finding in current.findings if finding.rule == "source.placement"]
+        baseline_places = [finding.path for finding in baseline.findings if finding.rule == "source.placement"]
+        self.assertEqual(["other/other.h.md"], current_places)
+        self.assertEqual(current_places, baseline_places)
+        self.assertNotIn("member/member.h.md", current_places + baseline_places)
 
 
 class DecisionStatementCase(PackageFixtures, unittest.TestCase):
@@ -741,6 +1880,64 @@ class DecisionStatementCase(PackageFixtures, unittest.TestCase):
                 })
                 self.assertEqual([], [str(finding) for finding in self.findings(package)])
 
+    def test_stated_by_accepts_exactly_the_six_bare_core_words(self) -> None:
+        package = self.make(
+            {
+                "model/model.h.md": "Model.\n",
+                "model/kernel.h.md": (
+                    "## Structure\n```\n"
+                    "  module     one\n  interface  one\n  item       one\n"
+                    "  decision   one\n  uses       relation\n```\n"
+                ),
+                "model/graph.h.md": "## Structure\n```\n  workspace  one\n  package    one\n```\n",
+                "model/model.decisions.md": (
+                    "**D-1. Core words**\n"
+                    "*Stated by* workspace, package, module, interface, item and decision.\n"
+                ),
+            },
+            modules=("model",),
+        )
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+
+        self.write(
+            "model/model.decisions.md",
+            "**D-1. Not a core word**\n*Stated by* module and uses.\n",
+        )
+        findings = self.findings(load_package(self.root))
+        self.assert_rule(findings, "semantic.stated-by-form", 1)
+        self.assertNotIn("semantic.stated-by-target", {finding.rule for finding in findings})
+
+    def test_bare_core_words_resolve_to_edition_items_across_modules(self) -> None:
+        package = self.make(
+            {
+                "model/model.h.md": "Model.\n",
+                "model/kernel.h.md": "## Structure\n```\n  module  contains no local lookalike\n```\n",
+                "model/graph.h.md": "## Structure\n```\n  package  edition meaning\n```\n",
+                "other/other.h.md": "## Structure\n```\n  module  local lookalike\n  package  local lookalike\n```\n",
+                "other/other.decisions.md": (
+                    "**D-1. Edition items**\n*Stated by* package and module.\n"
+                ),
+            },
+            modules=("model", "other"),
+        )
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+        negative = next(
+            finding
+            for finding in prose_findings(package, review=True)
+            if finding.rule == "prose.negative-definition" and finding.path == "model/kernel.h.md"
+        )
+        self.assertIn("D-1", negative.detail)
+
+    def test_bare_core_word_still_requires_an_item_and_bare_multiword_is_rejected(self) -> None:
+        for stated_by in ("decision", "full interface"):
+            with self.subTest(stated_by=stated_by):
+                package = self.make({
+                    "mod/mod.decisions.md": f"**D-1. Required target**\n*Stated by* {stated_by}\n",
+                })
+                findings = self.findings(package)
+                rule = "semantic.stated-by-target" if stated_by == "decision" else "semantic.stated-by-form"
+                self.assert_rule(findings, rule, 1)
+
     def test_every_stated_by_reference_lands_on_an_item(self) -> None:
         package = self.make({
             "mod/mod.decisions.md": """\
@@ -750,17 +1947,19 @@ class DecisionStatementCase(PackageFixtures, unittest.TestCase):
         })
         self.assert_rule(self.findings(package), "semantic.stated-by-target", 1)
 
-    def test_structure_item_cannot_use_a_later_item(self) -> None:
+    def test_structure_item_may_use_a_later_item(self) -> None:
         package = self.make({
             "mod/mod.h.md": """\
                 ## Structure
                 ```
-                  first    [second]
-                  second   definition
+                  entry    [failure]
+                  failure  definition
                 ```
                 """,
         })
-        self.assert_rule(self.findings(package), "semantic.definition-order", 1)
+        findings = self.findings(package)
+        self.assertEqual([], [str(finding) for finding in findings])
+        self.assertNotIn("semantic.definition-order", {finding.rule for finding in findings})
 
     def test_item_definition_cycles_are_detected_but_self_naming_is_allowed(self) -> None:
         package = self.make({
@@ -786,6 +1985,33 @@ class PointerStubLifetimeCase(PackageFixtures, unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.extra_temporaries.append(temporary)
         return self.make(files, root=Path(temporary.name))
+
+    def test_nested_copied_baseline_preserves_modules_decisions_and_lifetime(self) -> None:
+        original_temporary = tempfile.TemporaryDirectory()
+        working_temporary = tempfile.TemporaryDirectory()
+        current_temporary = tempfile.TemporaryDirectory()
+        self.extra_temporaries.extend((original_temporary, working_temporary, current_temporary))
+        files = {
+            "mod/mod.h.md": "## Structure\n```\n  run    meaning\n```\n",
+            "mod/mod.decisions.md": "**D-1. Kept**\n*Stated by* [run]\n*Because* History persists.\n",
+        }
+        original = self.make(files, root=Path(original_temporary.name))
+        self.assertIn("mod", original.module_map)
+        nested = Path(working_temporary.name) / "copies/working/baseline"
+        nested.parent.mkdir(parents=True)
+        shutil.copytree(original.root, nested)
+        shutil.copytree(original.root, nested / "language")
+        self.write(
+            "workspace.quoll.toml",
+            'packages = ["mod"]\ndescription = "Not a member package root."\n',
+            nested,
+        )
+        baseline = load_package(nested, baseline=True)
+        self.assertIn("mod", baseline.module_map)
+        self.assertEqual(["D-1"], [decision.id for decision in baseline.module_map["mod"].decisions.decisions])
+        self.assertNotIn("source.placement", {finding.rule for finding in baseline.findings})
+        current = self.make(files, root=Path(current_temporary.name))
+        self.assertEqual([], [str(finding) for finding in decision_lifetime_findings(current, baseline, review=True)])
 
     def test_full_entry_to_pointer_stub_is_valid_but_changed_successor_is_not(self) -> None:
         header = "## Structure\n```\n  run    meaning\n```\n"
@@ -822,6 +2048,184 @@ class PointerStubLifetimeCase(PackageFixtures, unittest.TestCase):
         finding = next(finding for finding in findings if finding.rule == "lifetime.in-place-replacement")
         self.assertEqual("D-2", finding.subject)
         self.assertEqual("review", finding.severity)
+
+    def test_inactive_pointer_migrates_when_its_successor_is_superseded(self) -> None:
+        header = "## Structure\n```\n  run    meaning\n```\n"
+        baseline = self.baseline({
+            "mod/mod.h.md": header,
+            "mod/mod.decisions.md": (
+                "**D-1.** *Superseded by* D-2\n\n"
+                "**D-2. Former active choice**\n*Stated by* [run]\n"
+            ),
+        })
+        current = self.make({
+            "mod/mod.h.md": header,
+            "mod/mod.decisions.md": (
+                "**D-1.** *Superseded by* D-3\n\n"
+                "**D-2.** *Superseded by* D-3\n\n"
+                "**D-3. Current choice**\n*Stated by* [run]\n"
+            ),
+        })
+        self.assertEqual(
+            [],
+            [
+                str(finding)
+                for finding in decision_lifetime_findings(current, baseline, review=True)
+            ],
+        )
+
+    def test_inactive_pointer_cannot_retarget_while_former_successor_is_active(self) -> None:
+        header = "## Structure\n```\n  run    meaning\n```\n"
+        baseline = self.baseline({
+            "mod/mod.h.md": header,
+            "mod/mod.decisions.md": (
+                "**D-1.** *Superseded by* D-2\n\n"
+                "**D-2. Still active**\n*Stated by* [run]\n\n"
+                "**D-3. Unrelated active choice**\n*Stated by* [run]\n"
+            ),
+        })
+        current = self.make({
+            "mod/mod.h.md": header,
+            "mod/mod.decisions.md": (
+                "**D-1.** *Superseded by* D-3\n\n"
+                "**D-2. Still active**\n*Stated by* [run]\n\n"
+                "**D-3. Unrelated active choice**\n*Stated by* [run]\n"
+            ),
+        })
+        findings = decision_lifetime_findings(current, baseline, review=True)
+        self.assert_rule(findings, "lifetime.successor-changed", 1)
+        self.assertEqual("D-1", findings[0].subject)
+        self.assertEqual(1, len(findings), [str(finding) for finding in findings])
+
+    def test_dependent_pointer_migration_still_requires_a_fresh_successor(self) -> None:
+        header = "## Structure\n```\n  run    meaning\n```\n"
+        baseline = self.baseline({
+            "mod/mod.h.md": header,
+            "mod/mod.decisions.md": (
+                "**D-1.** *Superseded by* D-2\n\n"
+                "**D-2.** *Superseded by* D-3\n\n"
+                "**D-3. Already committed**\n*Stated by* [run]\n"
+            ),
+        })
+        current = self.make({
+            "mod/mod.h.md": header,
+            "mod/mod.decisions.md": (
+                "**D-1.** *Superseded by* D-3\n\n"
+                "**D-2.** *Superseded by* D-3\n\n"
+                "**D-3. Already committed**\n*Stated by* [run]\n"
+            ),
+        })
+        findings = decision_lifetime_findings(current, baseline, review=True)
+        self.assert_rule(findings, "lifetime.successor-stale", 1)
+        self.assertEqual("D-1", findings[0].subject)
+        self.assertEqual(1, len(findings), [str(finding) for finding in findings])
+
+    def test_pointer_only_move_resolves_in_declared_parent_workspace(self) -> None:
+        self.write(
+            "workspace.quoll.toml",
+            'packages = ["member"]\ndescription = "Workspace."\n',
+        )
+        self.write(
+            "workspace.decisions.md",
+            "**WS-3. Moved choice**\n*Formerly* D-1\n*Because* The choice moved.\n",
+        )
+        package = self.make(
+            {
+                "mod/mod.h.md": "## Structure\n```\n  run  meaning\n```\n",
+                "mod/mod.decisions.md": "**D-1.** *Superseded by* WS-3\n",
+            },
+            root=self.root / "member",
+            pid="pkg:quoll/example.com/member",
+        )
+        self.assertEqual([], [str(finding) for finding in decision_lifetime_findings(package)])
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+
+        self.write(
+            "mod/mod.decisions.md",
+            "**D-1. Full historical entry**\n*Stated by* [run]\n*Superseded by* WS-3\n",
+            root=package.root,
+        )
+        full_entry = load_package(package.root)
+        self.assert_rule(
+            decision_lifetime_findings(full_entry),
+            "lifetime.successor-missing",
+            1,
+        )
+
+    def test_cross_module_pointer_chains_check_cycles_and_unique_ids(self) -> None:
+        files = {
+            "two/two.h.md": "## Structure\n```\n  run  meaning\n```\n",
+            "one/one.decisions.md": "**D-1.** *Superseded by* D-2\n",
+            "two/two.decisions.md": "**D-2. Current**\n*Stated by* [run]\n",
+        }
+        package = self.make(files, modules=("one", "two"))
+        self.assertEqual([], [str(finding) for finding in decision_lifetime_findings(package)])
+
+        self.write(
+            "two/two.decisions.md",
+            "**D-2.** *Superseded by* D-1\n",
+        )
+        cyclic = load_package(self.root)
+        findings = decision_lifetime_findings(cyclic)
+        self.assert_rule(findings, "lifetime.successor-cycle", 2)
+        self.assertNotIn("lifetime.successor-missing", {finding.rule for finding in findings})
+
+    def test_cross_module_dependent_migration_remains_guarded(self) -> None:
+        baseline_root = tempfile.TemporaryDirectory()
+        self.extra_temporaries.append(baseline_root)
+        old_files = {
+            "two/two.h.md": "## Structure\n```\n  run  meaning\n```\n",
+            "one/one.decisions.md": "**D-1.** *Superseded by* D-2\n",
+            "two/two.decisions.md": (
+                "**D-2.** *Superseded by* D-3\n\n"
+                "**D-3. Former endpoint**\n*Stated by* [run]\n"
+            ),
+        }
+        baseline = self.make(
+            old_files,
+            modules=("one", "two"),
+            root=Path(baseline_root.name),
+        )
+        current = self.make(
+            {
+                "two/two.h.md": old_files["two/two.h.md"],
+                "one/one.decisions.md": "**D-1.** *Superseded by* D-4\n",
+                "two/two.decisions.md": (
+                    "**D-2.** *Superseded by* D-4\n\n"
+                    "**D-3.** *Superseded by* D-4\n\n"
+                    "**D-4. Active endpoint**\n*Stated by* [run]\n"
+                ),
+            },
+            modules=("one", "two"),
+        )
+        self.assertEqual(
+            [],
+            [str(finding) for finding in decision_lifetime_findings(current, baseline, review=True)],
+        )
+
+        arbitrary_baseline = self.make(
+            {
+                "two/two.h.md": old_files["two/two.h.md"],
+                "one/one.decisions.md": "**D-1.** *Superseded by* D-2\n",
+                "two/two.decisions.md": (
+                    "**D-2. Still active**\n*Stated by* [run]\n\n"
+                    "**D-4. Unrelated active choice**\n*Stated by* [run]\n"
+                ),
+            },
+            modules=("one", "two"),
+            root=Path(baseline_root.name),
+        )
+        self.write(
+            "two/two.decisions.md",
+            (
+                "**D-2. Still active**\n*Stated by* [run]\n\n"
+                "**D-4. Unrelated active choice**\n*Stated by* [run]\n"
+            ),
+        )
+        arbitrary = load_package(self.root)
+        findings = decision_lifetime_findings(arbitrary, arbitrary_baseline, review=True)
+        self.assert_rule(findings, "lifetime.successor-changed", 1)
+        self.assertEqual("D-1", findings[0].subject)
 
     def test_twelve_one_line_stub_migrations_keep_ids_but_true_withdrawal_is_reported(self) -> None:
         old_entries: list[str] = []
@@ -897,6 +2301,85 @@ class PointerStubLifetimeCase(PackageFixtures, unittest.TestCase):
 
 
 class ProseCase(PackageFixtures, unittest.TestCase):
+    def test_language_uses_exactly_the_six_core_words(self) -> None:
+        package = self.make(
+            {
+                "language.h.md": (
+                    "Workspace package module interface item decision, while uses remains an item name.\n"
+                    "## Structure\n```\n"
+                    "  workspace    one\n  package      one\n  module       one\n"
+                    "  interface    one\n  item         one\n  decision     one\n  uses         relation\n"
+                    "```\n"
+                ),
+            },
+            modules=(),
+            pid="pkg:quoll/example.com/language",
+        )
+        findings = [
+            finding
+            for finding in prose_findings(package, review=True)
+            if finding.rule == "prose.bare-word"
+        ]
+        self.assertEqual(["uses"], [finding.subject for finding in findings], [str(finding) for finding in findings])
+
+    def test_workspace_decisions_scan_member_public_item_vocabulary(self) -> None:
+        self.write(
+            "workspace.quoll.toml",
+            'packages = ["member"]\ndescription = "Workspace."\n',
+        )
+        self.write(
+            "workspace.decisions.md",
+            "**W-1. Member vocabulary**\n*Because* The public surface may run a module.\n",
+        )
+        self.make(
+            {
+                "member.h.md": '+++\n[exposes]\ndefault = "default"\napi = "api"\n+++\n## Structure\n```\n  run    public\n  module    core word\n```\n',
+                "api.h.md": "## Structure\n```\n  public surface    public\n```\n",
+            },
+            modules=(),
+            root=self.root / "member",
+            pid="pkg:quoll/example.com/member",
+        )
+        findings = prose_findings(load_package(self.root), review=True)
+        compounds = [finding for finding in findings if finding.rule == "prose.bare-compound"]
+        words = [finding for finding in findings if finding.rule == "prose.bare-word"]
+        self.assertEqual(["public surface"], [finding.subject for finding in compounds])
+        self.assertEqual(["member.api.public surface"], [finding.detail.split("write [", 1)[1].split("]", 1)[0] for finding in compounds])
+        self.assertEqual(["run"], [finding.subject for finding in words])
+        self.assertEqual(["member.default.run"], [finding.detail.split("write [", 1)[1].split("]", 1)[0] for finding in words])
+        self.assertTrue(all(finding.path == "workspace.decisions.md" for finding in findings))
+
+    def test_workspace_vocabulary_follows_nested_exposures_to_default_items(self) -> None:
+        self.write(
+            "workspace.quoll.toml",
+            'packages = ["member"]\ndescription = "Workspace."\n',
+        )
+        self.write(
+            "workspace.decisions.md",
+            "**W-1. Nested vocabulary**\n*Because* The nested_single and nested compound are public.\n",
+        )
+        self.make(
+            {
+                "member.h.md": '+++\n[exposes]\napi = "branch.api"\n+++\nMember.\n',
+                "branch/branch.h.md": '+++\n[exposes]\napi = "deep.default"\n+++\nBranch.\n',
+                "branch/deep/deep.h.md": "## Structure\n```\n  nested_single    public\n  nested compound    public\n```\n",
+            },
+            modules=("branch", "branch/deep"),
+            root=self.root / "member",
+            pid="pkg:quoll/example.com/member",
+        )
+        findings = [
+            finding
+            for finding in prose_findings(load_package(self.root), review=True)
+            if finding.path == "workspace.decisions.md"
+        ]
+        compounds = [finding for finding in findings if finding.rule == "prose.bare-compound"]
+        words = [finding for finding in findings if finding.rule == "prose.bare-word"]
+        self.assertEqual(["nested compound"], [finding.subject for finding in compounds])
+        self.assertEqual(["nested_single"], [finding.subject for finding in words])
+        self.assertIn("[member.api.nested compound]", compounds[0].detail)
+        self.assertIn("[member.api.nested_single]", words[0].detail)
+
     def test_abstract_compounds_do_not_create_reverse_dependency_suggestions(self) -> None:
         package = self.make(
             {

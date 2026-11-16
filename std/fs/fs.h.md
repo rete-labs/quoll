@@ -1,4 +1,4 @@
-Native file-system places, whole files and directory trees, with explicit unsuccessful outcomes and no dependency on another package; how a target's standard library provides these operations is not stated here.
+Native file-system places, whole files and directory trees, with explicit unsuccessful outcomes and no dependency on another package.
 
 ## Structure
 
@@ -7,10 +7,11 @@ Native file-system places, whole files and directory trees, with explicit unsucc
   name     one file or directory component within a [path], as text rather than [path] syntax
   content  the complete sequence of bytes stored in a file, with no text encoding chosen
   kind     what stands at a [path]: a file, directory, symbolic link or another sort of object
-  failure  an explicit unsuccessful outcome: for an operation, the [path] concerned and the
-           operating system's reason; for a text conversion, the rejected value and its reason
   entry    one result of listing a directory: its [path], its [name] or the [failure] to
            convert that [name], and its [kind]
+
+  failure  an explicit unsuccessful outcome: for an operation, the [path] concerned and the
+           operating system's reason; for a text conversion, the rejected value and its reason
 ```
 
 ## Flow
@@ -20,6 +21,7 @@ Native file-system places, whole files and directory trees, with explicit unsucc
   render     return a [path]'s native textual form
   join       append a [name] to a [path], returning the joined [path]
   extract    return each [name] composing a [path] as text
+
   list       return every [entry] immediately within the directory at a [path], in native
              order with no ordering promise
   inspect    return the [kind] at a [path], following a symbolic link
