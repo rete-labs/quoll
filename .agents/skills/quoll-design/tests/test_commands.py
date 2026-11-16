@@ -122,13 +122,13 @@ class MainCommandCase(CommandFixtures):
     def test_supplied_dependency_surface_resolves_current_references(self) -> None:
         dependency = self.make_v04(
             self.temp / "dependency",
-            {"dep.h.md": "## Structure\n```\n  thing    provided\n```\n"},
+            {"dep.h.md": '+++\n[exposes]\ndefault = "default"\n+++\n## Structure\n```\n  thing    provided\n```\n'},
             modules=(),
             name="dep",
         )
         self.make_v04(
             self.current,
-            {"mod/mod.h.md": "A [dep.thing] and a [dep.missing].\n"},
+            {"mod/mod.h.md": "A [dep.default.thing] and a [dep.default.missing].\n"},
             dependencies=("pkg:quoll/example.com/dep@v0.1.0",),
         )
         without = self.run_command("check_package.py", self.current)
@@ -136,13 +136,13 @@ class MainCommandCase(CommandFixtures):
         supplied = self.run_command(
             "check_package.py", self.current, "--dependency", dependency
         )
-        self.assertIn("semantic.resolved dep.missing", supplied.stdout)
-        self.assertNotIn("semantic.resolved dep.thing", supplied.stdout)
+        self.assertIn("semantic.resolved dep.default.missing", supplied.stdout)
+        self.assertNotIn("semantic.resolved dep.default.thing", supplied.stdout)
         self.assertNotIn("Traceback", supplied.stderr)
 
         self.make_v04(
             self.baseline,
-            {"mod/mod.h.md": "A [dep.thing] and a [dep.missing].\n"},
+            {"mod/mod.h.md": "A [dep.default.thing] and a [dep.default.missing].\n"},
             dependencies=("pkg:quoll/example.com/dep@v0.1.0",),
         )
         filtered = self.run_command(

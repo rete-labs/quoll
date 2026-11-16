@@ -113,6 +113,16 @@ class PackageCase(PackageFixtures, unittest.TestCase):
         self.assertEqual(["missing"], source.references)
         self.assertEqual(["source.placement"], [finding.rule for finding in package.findings])
 
+    def test_obsolete_build_md_is_not_discovered_or_parsed(self) -> None:
+        self.current()
+        self.write(
+            "build.md",
+            "+++\nexposes = 1\n+++\n## Structure\n```\n  ignored    [missing]\n```\n",
+        )
+        package = load_package(self.root)
+        self.assertNotIn("build.md", [source.path for source in package.files])
+        self.assertEqual([], [str(finding) for finding in package.findings])
+
     def test_malformed_toml_becomes_findings(self) -> None:
         for filename in (
             "package.quoll.toml",
@@ -350,8 +360,19 @@ class PackageCase(PackageFixtures, unittest.TestCase):
     def test_every_current_language_pointer_stub_chain(self) -> None:
         repository = TEST_DIR.parents[3]
         package = load_package(repository / "language")
+        workspace = load_package(repository)
+        workspace_source = next(
+            source for source in workspace.files if source.kind == "workspace decisions"
+        )
+        workspace_decisions = {
+            decision.id: decision for decision in workspace_source.decisions
+        }
         expected = {
-            "language.decisions.md": {"QUOLL-7": "QUOLL-9"},
+            "language.decisions.md": {
+                "QUOLL-7": "QUOLL-12",
+                "QUOLL-8": "WS-3",
+                "QUOLL-9": "QUOLL-12",
+            },
             "layout/layout.decisions.md": {"LAYOUT-2": "LAYOUT-18", "LAYOUT-11": "LAYOUT-19"},
             "grammar/grammar.decisions.md": {
                 "GRAM-1": "GRAM-30",
@@ -378,8 +399,13 @@ class PackageCase(PackageFixtures, unittest.TestCase):
                         self.assertEqual(successor_id, stub.successor)
                         self.assertEqual({"superseded by"}, {key.casefold() for key in stub.fields})
                         self.assertEqual(1, len([line for line in stub.text.splitlines() if line.strip()]))
-                        self.assertIn(successor_id, decisions)
-                        self.assertTrue(decisions[successor_id].active)
+                        if successor_id in decisions:
+                            self.assertTrue(decisions[successor_id].active)
+                        else:
+                            self.assertEqual("QUOLL-8", old_id)
+                            successor = workspace_decisions[successor_id]
+                            self.assertTrue(successor.active)
+                            self.assertEqual("QUOLL-8", successor.fields["Formerly"])
         self.assertEqual([], [str(finding) for finding in decision_lifetime_findings(package)])
 
 

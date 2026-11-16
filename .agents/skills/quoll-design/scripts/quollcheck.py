@@ -7,7 +7,7 @@ these data classes elsewhere.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 import hashlib
 import os
@@ -28,21 +28,31 @@ class Finding:
     subject: str
     detail: str
     line: int = field(default=0, compare=False)
+    package_id: str = ""
 
     def __post_init__(self) -> None:
         if self.severity not in {"error", "review"}:
             raise ValueError("finding severity must be 'error' or 'review'")
 
     @property
-    def key(self) -> tuple[str, str, str, str, str]:
-        return (self.rule, self.severity, self.path, self.subject, self.detail)
+    def key(self) -> tuple[str, str, str, str, str, str]:
+        return (
+            self.rule,
+            self.severity,
+            self.path,
+            self.subject,
+            self.detail,
+            self.package_id,
+        )
 
     @property
-    def sort_key(self) -> tuple[str, str, str, str, str]:
+    def sort_key(self) -> tuple[str, str, str, str, str, str]:
         return self.key
 
     def __str__(self) -> str:
         location = self.path or "<package>"
+        if self.package_id:
+            location = f"{self.package_id}::{location}"
         if self.line:
             location += f":{self.line}"
         subject = f" {self.subject}" if self.subject else ""
@@ -183,7 +193,10 @@ class Package:
     modules: list[Module] = field(default_factory=list)
     manifest: dict | None = None
     membership: dict | None = None
+    workspace: dict | None = None
     lock: dict | None = None
+    workspace_members: list[Package] = field(default_factory=list, repr=False)
+    related_decisions: list[tuple[Module, SourceFile]] = field(default_factory=list, repr=False)
     findings: list[Finding] = field(default_factory=list)
     _parse_findings: list[Finding] = field(default_factory=list, repr=False)
 
@@ -376,8 +389,8 @@ def _classify_file(path: str) -> str | None:
         return "modules"
     if top and name == "package.lock.quoll.toml":
         return "lock"
-    if top and name == "build.md":
-        return "build"
+    if top and name == "workspace.decisions.md":
+        return "workspace decisions"
     if name.endswith(".private.h.md"):
         return "private header"
     if name.endswith(".h.md"):
@@ -408,7 +421,7 @@ def _source_text(package: Package, path: str) -> str:
 def _parse_front(
     package: Package, source: SourceFile, lines: list[str]
 ) -> list[str]:
-    if source.kind not in {"header", "private header", "body"}:
+    if source.kind not in {"header", "private header", "body", "decisions", "workspace decisions"}:
         return lines
     if not lines or lines[0].rstrip("\r\n") != "+++":
         return lines
@@ -433,14 +446,97 @@ def _parse_front(
     return ["\n"] * (closing + 1) + lines[closing + 1 :]
 
 
+def _valid_exposure_spelling(value: object) -> bool:
+    if not isinstance(value, str) or not value or value != value.strip():
+        return False
+    if any(character in value for character in "[]\r\n"):
+        return False
+    parts = value.split(".")
+    return all(part and part == part.strip() for part in parts)
+
+
+def _toml_assignment_key(line: str) -> str | None:
+    """Return the raw TOML key before an assignment's unquoted equals sign."""
+
+    quote: str | None = None
+    escaped = False
+    for index, character in enumerate(line):
+        if quote == '"':
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == quote:
+                quote = None
+        elif quote == "'":
+            if character == quote:
+                quote = None
+        elif character in {'"', "'"}:
+            quote = character
+        elif character == "=":
+            return line[:index]
+    return None
+
+
+def _toml_declares_key(raw_key: str, key: str) -> bool:
+    """Decode bare, dotted, literal and escaped basic keys with the TOML parser."""
+
+    try:
+        parsed = tomllib.loads(f"{raw_key} = 0")
+    except tomllib.TOMLDecodeError:
+        return False
+    return key in parsed
+
+
+def _front_mapping_line(source: SourceFile, key: str) -> int:
+    """Locate a decoded key only in the actual exposes table or inline table."""
+
+    in_exposes = False
+    for number, line in enumerate(source.text.splitlines(), 1):
+        stripped = line.strip()
+        if stripped == "+++":
+            if number > 1:
+                break
+            continue
+        if stripped.startswith("["):
+            try:
+                table = tomllib.loads(stripped)
+            except tomllib.TOMLDecodeError:
+                in_exposes = False
+            else:
+                nested = table.get("exposes")
+                in_exposes = table == {"exposes": {}}
+                if (
+                    not in_exposes
+                    and set(table) == {"exposes"}
+                    and isinstance(nested, dict)
+                    and key in nested
+                ):
+                    return number
+            continue
+        raw_key = _toml_assignment_key(line)
+        if raw_key is None:
+            continue
+        if in_exposes and _toml_declares_key(raw_key, key):
+            return number
+        try:
+            parsed = tomllib.loads(line)
+        except tomllib.TOMLDecodeError:
+            continue
+        inline = parsed.get("exposes")
+        if isinstance(inline, dict) and key in inline:
+            return number
+    return 0
+
+
 def _validate_front(package: Package, source: SourceFile) -> None:
     if not source.front:
         return
     allowed = {"aliases"}
     if source.kind == "body":
         allowed.add("implements")
-    else:
-        allowed.update({"includes", "module lead"})
+    elif source.kind in {"header", "private header"}:
+        allowed.update({"includes", "exposes", "module lead"})
     for key, value in source.front.items():
         if key not in allowed:
             package._parse_findings.append(
@@ -452,6 +548,31 @@ def _validate_front(package: Package, source: SourceFile) -> None:
             package._parse_findings.append(
                 Finding("front.type", "error", source.path, key, "value must be a list of names")
             )
+        elif key == "exposes":
+            if not isinstance(value, dict):
+                package._parse_findings.append(
+                    Finding("front.type", "error", source.path, key, "value must be a table of string targets")
+                )
+            else:
+                for exposed, target in value.items():
+                    line = _front_mapping_line(source, exposed)
+                    if not _valid_exposure_spelling(exposed):
+                        package._parse_findings.append(
+                            Finding("front.exposure", "error", source.path, str(exposed), "exposed path is not a reference spelling without brackets", line)
+                        )
+                    if not isinstance(target, str):
+                        detail = (
+                            "dotted exposure keys must be quoted wholly as one TOML key"
+                            if isinstance(target, dict)
+                            else "exposure target must be a TOML string"
+                        )
+                        package._parse_findings.append(
+                            Finding("front.type", "error", source.path, str(exposed), detail, line)
+                        )
+                    elif not _valid_exposure_spelling(target):
+                        package._parse_findings.append(
+                            Finding("front.exposure", "error", source.path, str(exposed), "target is not a reference spelling without brackets", line)
+                        )
         elif key == "module lead" and value is not True:
             package._parse_findings.append(
                 Finding("front.type", "error", source.path, key, "value must be true")
@@ -466,7 +587,7 @@ def _validate_front(package: Package, source: SourceFile) -> None:
                 )
             else:
                 for alias, target in value.items():
-                    if target.startswith("pkg:"):
+                    if target.startswith("pkg:") and source.kind != "workspace decisions":
                         try:
                             if "@" in target:
                                 parse_selector(target.split("#", 1)[0])
@@ -696,9 +817,9 @@ def _parse_source(package: Package, source: SourceFile) -> None:
     lines = _parse_front(package, source, lines)
     _validate_front(package, source)
     source.content = "".join(lines)
-    if source.kind == "decisions":
+    if source.kind in {"decisions", "workspace decisions"}:
         _parse_decisions(source, lines)
-    elif source.kind in {"header", "private header", "body", "build"}:
+    elif source.kind in {"header", "private header", "body"}:
         _parse_views(source, lines)
 
 
@@ -731,7 +852,19 @@ def _add_module(package: Package, path: str, name: str) -> Module:
     return module
 
 
-def _discover_modules(package: Package, member_paths: list[str]) -> None:
+def _baseline_copy_root(package: Package, candidate: Path) -> bool:
+    """Recognize a nested copy of the baseline package, not another package."""
+
+    try:
+        return all(
+            (package.root / filename).read_bytes() == (candidate / filename).read_bytes()
+            for filename in ("package.quoll.toml", "modules.quoll.toml")
+        )
+    except OSError:
+        return False
+
+
+def _discover_modules(package: Package, member_paths: list[str], baseline: bool = False) -> None:
     _add_module(package, "", package.name)
     for path in member_paths:
         if path == "":
@@ -743,8 +876,27 @@ def _discover_modules(package: Package, member_paths: list[str]) -> None:
     # placement error itself.
     loaded = {source.path for source in package.files}
     unlisted: dict[str, list[str]] = {}
+    workspace_roots = set()
+    if package.workspace is not None:
+        workspace_roots = {
+            path
+            for path in package.workspace.get("packages", [])
+            if isinstance(path, str)
+            and _valid_module_path(path)
+            and (package.root / path / "package.quoll.toml").is_file()
+        }
     for directory, dirnames, filenames in os.walk(package.root):
         dirnames[:] = sorted(name for name in dirnames if not name.startswith("."))
+        relative_directory = Path(directory).relative_to(package.root)
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if (relative_directory / name).as_posix() not in workspace_roots
+            and not (
+                baseline
+                and _baseline_copy_root(package, Path(directory) / name)
+            )
+        ]
         for filename in sorted(filenames):
             if filename.startswith("."):
                 continue
@@ -981,6 +1133,48 @@ def validate_structured(package: Package) -> list[Finding]:
     return sorted(findings)
 
 
+def _load_related_decisions(package: Package) -> None:
+    """Load only the decision collection of a workspace declaring this package."""
+
+    if package.workspace is not None:
+        return
+    package_root = package.root.resolve()
+    for ancestor in package.root.parents:
+        manifest_path = ancestor / "workspace.quoll.toml"
+        if not manifest_path.is_file():
+            continue
+        try:
+            with manifest_path.open("rb") as stream:
+                workspace = tomllib.load(stream)
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            continue
+        members = workspace.get("packages", [])
+        if not isinstance(members, list) or not any(
+            isinstance(member, str)
+            and _valid_module_path(member)
+            and (ancestor / member).resolve() == package_root
+            for member in members
+        ):
+            continue
+        decision_path = ancestor / "workspace.decisions.md"
+        try:
+            text = decision_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return
+        source = SourceFile(
+            path=str(decision_path),
+            kind="workspace decisions",
+            text=text,
+            content=text,
+            module="<workspace>",
+        )
+        _parse_decisions(source, text.splitlines(keepends=True))
+        package.related_decisions.append(
+            (Module(path="<workspace>", name="workspace", files=[source]), source)
+        )
+        return
+
+
 def load_package(root: str | os.PathLike[str], baseline: bool = False) -> Package:
     """Discover and structurally validate a current or earlier v0.4 package."""
 
@@ -988,6 +1182,7 @@ def load_package(root: str | os.PathLike[str], baseline: bool = False) -> Packag
     package = Package(root=root_path, name=root_path.name)
     package.manifest = _read_toml(package, "package.quoll.toml")
     package.membership = _read_toml(package, "modules.quoll.toml")
+    package.workspace = _read_toml(package, "workspace.quoll.toml")
     package.lock = _read_toml(package, "package.lock.quoll.toml")
     if package.manifest and isinstance(package.manifest.get("id"), str):
         package.id = package.manifest["id"]
@@ -995,6 +1190,10 @@ def load_package(root: str | os.PathLike[str], baseline: bool = False) -> Packag
             package.name = package.id.rsplit("/", 1)[-1]
         except IndexError:
             pass
+    if package.workspace and isinstance(package.workspace.get("packages"), list):
+        for member_path in package.workspace["packages"]:
+            if isinstance(member_path, str) and _valid_module_path(member_path):
+                package.workspace_members.append(load_package(root_path / member_path))
     members: list[str] = []
     if package.membership and isinstance(package.membership.get("modules"), list):
         members = [
@@ -1002,7 +1201,8 @@ def load_package(root: str | os.PathLike[str], baseline: bool = False) -> Packag
             for path in package.membership["modules"]
             if isinstance(path, str) and _valid_module_path(path)
         ]
-    _discover_modules(package, list(dict.fromkeys(members)))
+    _discover_modules(package, list(dict.fromkeys(members)), baseline=baseline)
+    _load_related_decisions(package)
     package.findings = validate_structured(package)
     return package
 
@@ -1130,6 +1330,9 @@ class _SemanticTarget:
     decision: Decision | None = None
     source: SourceFile | None = None
     dependency: Selector | None = None
+    external: bool = False
+    exposure: _SemanticExposure | None = None
+    exposure_chain: tuple[_SemanticExposure, ...] = ()
 
 
 @dataclass
@@ -1159,7 +1362,69 @@ class _SemanticAlias:
     selectors: list[Selector] = field(default_factory=list)
 
 
+@dataclass(eq=False)
+class _SemanticExposure:
+    module: Module
+    source: SourceFile
+    key: tuple[str, ...]
+    value: str
+    line: int
+    resolution: _SemanticResolution | None = None
+    dependencies: set["_SemanticExposure"] = field(default_factory=set)
+
+    @property
+    def name(self) -> str:
+        return ".".join(self.key)
+
+    @property
+    def target(self) -> _SemanticTarget | None:
+        if self.resolution is None or self.resolution.status != "ok" or len(self.resolution.targets) != 1:
+            return None
+        return self.resolution.targets[0]
+
+
+@dataclass(frozen=True)
+class PublicUnit:
+    """One identified canonical source file needed by an external reader."""
+
+    identity: str
+    path: str
+    locator: str
+    package_id: str
+    dependencies: tuple[str, ...] = ()
+    exposures: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PublicModule:
+    """An exposed module's identity and directory place, without its contents."""
+
+    identity: str
+    path: str
+    locator: str
+    package_id: str
+    name: str
+
+
+@dataclass(frozen=True)
+class PublicReading:
+    """A deterministic, bounded canonical public-reader input."""
+
+    units: tuple[PublicUnit, ...]
+    dependencies: tuple[str, ...]
+    modules: tuple[PublicModule, ...] = ()
+
+    @property
+    def paths(self) -> tuple[str, ...]:
+        return tuple(unit.path for unit in self.units)
+
+    @property
+    def identities(self) -> tuple[str, ...]:
+        return tuple(unit.identity for unit in self.units)
+
+
 _SEMANTIC_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
+_MODEL_CORE_WORDS = {"workspace", "package", "module", "interface", "item", "decision"}
 
 
 def _semantic_stem(source: SourceFile) -> str:
@@ -1194,6 +1459,8 @@ class _SemanticModel:
         self.pair_targets: dict[tuple[str, int], list[_SemanticTarget]] = {}
         self.pair_interfaces: dict[tuple[str, int], _SemanticInterface] = {}
         self.dependency_targets: dict[int, _SemanticTarget] = {}
+        self.exposures: list[_SemanticExposure] = []
+        self.exposures_by_module: dict[str, list[_SemanticExposure]] = {}
         for module in package.modules:
             for source in module.files:
                 if source.kind in {"header", "private header"}:
@@ -1243,6 +1510,25 @@ class _SemanticModel:
                 selector.id.rsplit("/", 1)[-1],
                 dependency=selector,
             )
+        for module in package.modules:
+            for source in module.files:
+                if source.kind not in {"header", "private header"}:
+                    continue
+                raw_exposures = source.front.get("exposes", {})
+                if not isinstance(raw_exposures, dict):
+                    continue
+                for key, value in raw_exposures.items():
+                    if not _valid_exposure_spelling(key) or not _valid_exposure_spelling(value):
+                        continue
+                    exposure = _SemanticExposure(
+                        module,
+                        source,
+                        tuple(key.split(".")),
+                        value,
+                        _front_mapping_line(source, key),
+                    )
+                    self.exposures.append(exposure)
+                    self.exposures_by_module.setdefault(module.path, []).append(exposure)
 
     def default_interface(self, module: Module) -> _SemanticInterface | None:
         return next((interface for interface in self.by_module.get(module.path, []) if interface.default), None)
@@ -1279,6 +1565,64 @@ class _SemanticModel:
     def root_interfaces(self, package: Package | None = None) -> list[_SemanticInterface]:
         return [interface for interface in self.interfaces if interface.root_public]
 
+    def root_exposures(self) -> list[_SemanticExposure]:
+        return [
+            exposure
+            for exposure in self.exposures
+            if exposure.module.path == "" and exposure.target is not None
+        ]
+
+    def reachable_exposures(
+        self,
+        roots: Iterable[_SemanticExposure] | None = None,
+    ) -> list[_SemanticExposure]:
+        result: list[_SemanticExposure] = []
+        pending = list(self.root_exposures() if roots is None else roots)
+        seen: set[_SemanticExposure] = set()
+        while pending:
+            exposure = pending.pop()
+            if exposure in seen:
+                continue
+            seen.add(exposure)
+            result.append(exposure)
+            pending.extend(exposure.dependencies)
+            target = exposure.target
+            if target is not None and target.package is self.package and target.kind == "module" and target.module is not None:
+                pending.extend(
+                    candidate
+                    for candidate in self.exposures_by_module.get(target.module.path, [])
+                    if candidate.target is not None
+                )
+        return result
+
+    def public_interfaces(self) -> list[_SemanticInterface]:
+        return _semantic_unique(
+            exposure.target.interface
+            for exposure in self.root_exposures()
+            if exposure.target is not None
+            and exposure.target.kind == "interface"
+            and exposure.target.interface is not None
+        )
+
+    def public_item_paths(self) -> list[tuple[_SemanticTarget, str]]:
+        result: list[tuple[_SemanticTarget, str]] = []
+        for exposure in self.root_exposures():
+            target = exposure.target
+            if (
+                target is None
+                or target.kind != "interface"
+                or target.interface is None
+            ):
+                continue
+            result.extend(
+                (item, f"{exposure.name}.{item.name}")
+                for item in self.interface_items(target.interface)
+            )
+        return result
+
+    def public_items(self) -> list[_SemanticTarget]:
+        return _semantic_unique(target for target, _path in self.public_item_paths())
+
 
 class _SemanticResolver:
     def __init__(
@@ -1300,7 +1644,18 @@ class _SemanticResolver:
         if isinstance(raw_aliases, dict):
             for name, value in raw_aliases.items():
                 if isinstance(name, str) and isinstance(value, str):
-                    self.aliases[name] = _SemanticAlias(name, value, source, value.startswith("pkg:"))
+                    purl = value.startswith("pkg:") and context != "workspace decision"
+                    self.aliases[name] = _SemanticAlias(name, value, source, purl)
+
+    def _reference_parts(self, reference: str) -> list[str]:
+        if self.context == "workspace decision" and reference.startswith("pkg:quoll/"):
+            for member in self.checker.workspace_members:
+                if reference == member.id:
+                    return [member.id]
+                if reference.startswith(member.id + "."):
+                    rest = reference[len(member.id) + 1 :]
+                    return [member.id, *rest.split(".")]
+        return reference.split(".")
 
     def resolve(
         self,
@@ -1311,7 +1666,62 @@ class _SemanticResolver:
         relation: bool = False,
         alias_stack: tuple[str, ...] = (),
     ) -> _SemanticResolution:
-        parts = [part.strip() for part in reference.split(".")]
+        parts = [part.strip() for part in self._reference_parts(reference)]
+        if (
+            self.context == "workspace decision"
+            or not parts
+            or parts[0] in self.aliases
+            or any(not part for part in parts)
+        ):
+            return self._resolve_structural(
+                reference,
+                include_implemented=include_implemented,
+                allow_parent=allow_parent,
+                relation=relation,
+                alias_stack=alias_stack,
+            )
+        if len(parts) > 1 and parts[0] == self.model.package.name:
+            root = next(
+                (module for module in self.model.package.modules if module.path == ""),
+                None,
+            )
+            if root is None:
+                return _SemanticResolution(
+                    status="unresolved", detail="package has no root module"
+                )
+            public = self._exposure_continuation(root, parts[1:], external=True)
+            matching_dependencies = [
+                self.model.dependency_targets[id(selector)]
+                for selector in self.model.package.dependencies
+                if selector.id.rsplit("/", 1)[-1] == self.model.package.name
+            ]
+            if matching_dependencies:
+                return self._merge(
+                    public,
+                    *(
+                        self._dependency_continuation(dependency, parts[1:])
+                        for dependency in matching_dependencies
+                    ),
+                )
+            return public
+        return self._resolve_structural(
+            reference,
+            include_implemented=include_implemented,
+            allow_parent=allow_parent,
+            relation=relation,
+            alias_stack=alias_stack,
+        )
+
+    def _resolve_structural(
+        self,
+        reference: str,
+        *,
+        include_implemented: bool = True,
+        allow_parent: bool = False,
+        relation: bool = False,
+        alias_stack: tuple[str, ...] = (),
+    ) -> _SemanticResolution:
+        parts = [part.strip() for part in self._reference_parts(reference)]
         if not reference or any(not part for part in parts):
             return _SemanticResolution(status="form", detail="reference has an empty name segment")
         if parts[0] in self.aliases:
@@ -1321,9 +1731,6 @@ class _SemanticResolver:
             if len(base.targets) != 1:
                 return _SemanticResolution(status="ambiguous", detail="alias does not identify one target")
             return self._continue(base.targets[0], parts[1:])
-        rooted = self._resolve_root_facade_or_module(parts)
-        if rooted is not None:
-            return rooted
         candidates = self._first_candidates(parts, include_implemented, allow_parent)
         visible = [target for target in candidates if self._visible(target, include_implemented, allow_parent)]
         if candidates and not visible:
@@ -1349,31 +1756,6 @@ class _SemanticResolver:
             return _SemanticResolution([target, *pair])
         return self._continue(target, parts[1:])
 
-    def _resolve_root_facade_or_module(self, parts: list[str]) -> _SemanticResolution | None:
-        if self.module.path != "" or len(parts) < 2 or parts[1] == "default":
-            return None
-        facades = [
-            interface
-            for interface in self.model.root_interfaces()
-            if not interface.default and interface.name == parts[0]
-        ]
-        modules = [
-            target
-            for target in self.model.modules.values()
-            if target.module is not None and target.module.path != "" and target.name == parts[0]
-        ]
-        if len(facades) != 1 or len(modules) != 1:
-            return None
-        facade = self._continue(self._interface_target(facades[0]), parts[1:])
-        module = self._continue(modules[0], parts[1:])
-        if facade.status == "ok":
-            return facade
-        if module.status == "ok":
-            return module
-        if module.status == "sight" and facade.status == "unresolved":
-            return module
-        return facade
-
     def _first_candidates(
         self,
         parts: list[str],
@@ -1381,6 +1763,15 @@ class _SemanticResolver:
         allow_parent: bool,
     ) -> list[_SemanticTarget]:
         name = parts[0]
+        if self.context == "workspace decision":
+            members = []
+            for member in self.checker.workspace_members:
+                if name not in {member.name, member.id}:
+                    continue
+                root = next((module for module in member.modules if module.path == ""), None)
+                if root is not None:
+                    members.append(_SemanticTarget("member", member, member.name, module=root))
+            return members
         root_default_path = self.module.path == "" and len(parts) > 1 and parts[1] == "default"
         own_interfaces = self.model.by_module.get(self.module.path, [])
         if self.context == "interface":
@@ -1422,17 +1813,98 @@ class _SemanticResolver:
             if target.name == name
             or (target.module is not None and target.module.path == "" and self.model.package.name == name)
         ]
-        facades = [] if root_default_path else [
-            self._interface_target(interface)
-            for interface in self.model.root_interfaces()
-            if not interface.default and interface.name == name
-        ]
         dependencies = [
             self.model.dependency_targets[id(selector)]
             for selector in self.model.package.dependencies
             if selector.id.rsplit("/", 1)[-1] == name
         ]
-        return [*facades, *modules, *dependencies]
+        return [*modules, *dependencies]
+
+    def _merge(self, *resolutions: _SemanticResolution) -> _SemanticResolution:
+        successful_resolutions = [resolution for resolution in resolutions if resolution.status == "ok"]
+        if len(successful_resolutions) == 1:
+            return successful_resolutions[0]
+        successful: list[_SemanticTarget] = []
+        seen: set[tuple] = set()
+        for resolution in successful_resolutions:
+            for target in resolution.targets:
+                key = self.checker._target_key(target)
+                if key not in seen:
+                    seen.add(key)
+                    successful.append(target)
+        if len(successful) == 1:
+            return _SemanticResolution(successful)
+        if len(successful) > 1:
+            return _SemanticResolution(status="ambiguous", detail="name identifies multiple targets without precedence")
+        for status in ("ambiguous", "alias-cycle", "exposure-cycle", "sight", "wrong-dependency", "form", "unavailable"):
+            match = next((resolution for resolution in resolutions if resolution.status == status), None)
+            if match is not None:
+                return match
+        return next(
+            (resolution for resolution in resolutions if resolution.status == "unresolved"),
+            _SemanticResolution(status="unresolved", detail="no target bears this name"),
+        )
+
+    def _exposure_continuation(
+        self,
+        module: Module,
+        parts: list[str],
+        *,
+        external: bool,
+        model: "_SemanticModel | None" = None,
+    ) -> _SemanticResolution:
+        model = model or self.model
+        exposures = [
+            exposure
+            for exposure in model.exposures_by_module.get(module.path, [])
+            if len(exposure.key) <= len(parts) and tuple(parts[: len(exposure.key)]) == exposure.key
+        ]
+        if not exposures:
+            return _SemanticResolution(status="unresolved", detail="no exposure bears this path")
+        resolutions: list[_SemanticResolution] = []
+        for exposure in exposures:
+            resolution = self.checker._resolve_exposure(exposure)
+            if self.checker._exposure_resolving and self.checker._exposure_resolving[-1] is not exposure:
+                self.checker._exposure_resolving[-1].dependencies.add(exposure)
+            if resolution.status != "ok" or len(resolution.targets) != 1:
+                resolutions.append(resolution)
+                continue
+            target = resolution.targets[0]
+            provenance = (
+                exposure
+                if target.package is model.package
+                else target.exposure or exposure
+            )
+            target = replace(
+                target,
+                external=target.external or external,
+                exposure=provenance,
+                exposure_chain=(exposure, *target.exposure_chain),
+            )
+            if not external and module is self.module and not self._visible(target, True, False):
+                resolutions.append(
+                    _SemanticResolution(status="sight", detail="exposure target is outside the author's sight")
+                )
+                continue
+            rest = parts[len(exposure.key) :]
+            if external and rest and target.kind == "module":
+                resolutions.append(self._module_continuation(target, rest, dependency=True))
+                continue
+            continued = self._continue(target, rest)
+            if continued.status == "ok":
+                continued = _SemanticResolution(
+                    [
+                        replace(
+                            candidate,
+                            external=candidate.external or external,
+                            exposure=provenance,
+                            exposure_chain=target.exposure_chain,
+                        )
+                        for candidate in continued.targets
+                    ]
+                )
+            resolutions.append(continued)
+        return self._merge(*resolutions)
 
     def _interface_target(self, interface: _SemanticInterface) -> _SemanticTarget:
         return _SemanticTarget(
@@ -1445,6 +1917,10 @@ class _SemanticResolver:
         )
 
     def _visible(self, target: _SemanticTarget, include_implemented: bool, allow_parent: bool) -> bool:
+        if target.kind == "member":
+            return self.context == "workspace decision" and any(
+                target.package is member for member in self.checker.workspace_members
+            )
         if target.package is not self.model.package:
             return True
         if target.kind == "dependency":
@@ -1514,9 +1990,11 @@ class _SemanticResolver:
         if not rest:
             return _SemanticResolution([target])
         if target.kind == "module":
-            return self._module_continuation(target, rest, dependency=False)
+            return self._module_continuation(target, rest, dependency=target.external)
         if target.kind == "dependency":
             return self._dependency_continuation(target, rest)
+        if target.kind == "member":
+            return self._module_continuation(target, rest, dependency=True)
         if target.kind == "interface" and target.interface is not None:
             matches = [
                 candidate
@@ -1546,42 +2024,54 @@ class _SemanticResolver:
         if module is None:
             return _SemanticResolution(status="unresolved", detail="dependency has no loaded root")
         model = self.checker.models.get(id(target.package), self.model)
+        if dependency:
+            return self._exposure_continuation(
+                module, rest, external=True, model=model
+            )
+        if rest[0] == "default" and len(rest) > 1:
+            return _SemanticResolution(
+                status="form", detail="no segment may follow a module's default"
+            )
+        exposed = self._exposure_continuation(module, rest, external=False, model=model)
         if rest[0] == "default":
-            if len(rest) > 1:
-                return _SemanticResolution(status="form", detail="no segment may follow a module's default")
             candidates = [
                 interface
                 for interface in model.by_module.get(module.path, [])
-                if interface.default and (not dependency or interface.root_public)
+                if interface.default
             ]
         else:
             candidates = [
                 interface
                 for interface in model.by_module.get(module.path, [])
-                if not interface.default and interface.name == rest[0] and (not dependency or interface.root_public)
+                if not interface.default and interface.name == rest[0]
             ]
             default = model.default_interface(module)
-            if default is not None and (not dependency or default.root_public):
+            if default is not None:
                 items = _semantic_unique(item for item in model.interface_items(default) if item.name == rest[0])
                 if items:
                     if len(rest) > 1:
-                        return _SemanticResolution(status="form", detail="no segment may follow an item")
+                        structural = _SemanticResolution(status="form", detail="no segment may follow an item")
+                        return self._merge(structural, exposed)
                     if candidates or len(items) > 1:
-                        detail = "name is both an interface and a default item" if candidates else "default path names multiple included items"
-                        return _SemanticResolution(status="ambiguous", detail=detail)
-                    return _SemanticResolution(items)
+                        structural = _SemanticResolution(
+                            status="ambiguous",
+                            detail="name is both an interface and a default item" if candidates else "default path names multiple included items",
+                        )
+                        return self._merge(structural, exposed)
+                    return self._merge(_SemanticResolution(items), exposed)
         targets = [self._interface_target_for(model, interface) for interface in candidates]
-        if not dependency:
-            visible = [candidate for candidate in targets if self._visible(candidate, True, False)]
-            if targets and not visible:
-                return _SemanticResolution(status="sight", detail="interface is private at this point")
-            targets = visible
-        targets = _semantic_unique(targets)
+        visible = [candidate for candidate in targets if self._visible(candidate, True, False)]
+        if targets and not visible:
+            structural = _SemanticResolution(status="sight", detail="interface is private at this point")
+            return self._merge(structural, exposed)
+        targets = _semantic_unique(visible)
         if not targets:
-            return _SemanticResolution(status="unresolved", detail="module has no interface or default item with this name")
+            structural = _SemanticResolution(status="unresolved", detail="module has no interface or default item with this name")
+            return self._merge(structural, exposed)
         if len(targets) > 1:
-            return _SemanticResolution(status="ambiguous", detail="module path has multiple targets")
-        return self._continue(targets[0], rest[1:])
+            structural = _SemanticResolution(status="ambiguous", detail="module path has multiple targets")
+            return self._merge(structural, exposed)
+        return self._merge(self._continue(targets[0], rest[1:]), exposed)
 
     def _interface_target_for(self, model: _SemanticModel, interface: _SemanticInterface) -> _SemanticTarget:
         return _SemanticTarget(
@@ -1595,6 +2085,11 @@ class _SemanticResolver:
 
     def _dependency_continuation(self, target: _SemanticTarget, rest: list[str]) -> _SemanticResolution:
         supplied = self.checker.supplied_for(target.dependency)
+        if supplied is not None and id(supplied) in self.checker._preparing:
+            return _SemanticResolution(
+                status="unavailable",
+                detail="dependency preparation is cyclic",
+            )
         if supplied is None:
             if target.dependency is not None and any(
                 package.id != target.dependency.id
@@ -1605,14 +2100,12 @@ class _SemanticResolver:
                     status="wrong-dependency",
                     detail="supplied package ID does not match the declared dependency",
                 )
-            if rest[0] == "default" and len(rest) > 1:
-                return _SemanticResolution(status="form", detail="no segment may follow a dependency's default")
             return _SemanticResolution(status="unavailable", detail="dependency surface is not supplied")
         model = self.checker.models[id(supplied)]
         root = next((module for module in supplied.modules if module.path == ""), None)
         if root is None:
             return _SemanticResolution(status="unresolved", detail="dependency has no root module")
-        external = _SemanticTarget("module", supplied, root.name, module=root)
+        external = _SemanticTarget("module", supplied, root.name, module=root, external=True)
         return self._module_continuation(external, rest, dependency=True)
 
     def _resolve_alias(self, name: str, stack: tuple[str, ...]) -> _SemanticResolution:
@@ -1632,26 +2125,65 @@ class _SemanticResolver:
             return base
         if base.status != "ok":
             return base
-        if len(base.targets) != 1 or base.targets[0].kind not in {"interface", "item"}:
-            return _SemanticResolution(status="form", detail="qualified alias must name one dependency interface or item")
-        if base.targets[0].package is self.model.package:
-            return _SemanticResolution(status="form", detail="qualified alias target is not reached through a dependency")
+        if self.context == "workspace decision":
+            allowed = {"member", "module", "interface", "item"}
+        elif self.context == "interface":
+            allowed = {"module", "interface", "item"}
+        else:
+            allowed = {"module", "interface", "item", "body-item"}
+        if len(base.targets) != 1 or base.targets[0].kind not in allowed:
+            return _SemanticResolution(status="form", detail="qualified alias must name one visible module, interface or item")
         return base
 
 
 class _SemanticChecker:
-    def __init__(self, package: Package, dependency_packages: Iterable[Package]) -> None:
+    def __init__(
+        self,
+        package: Package,
+        dependency_packages: Iterable[Package],
+        _prepared: dict[int, "_SemanticChecker"] | None = None,
+        _preparing: set[int] | None = None,
+    ) -> None:
         self.package = package
         self.dependencies = list(dependency_packages)
         self.models: dict[int, _SemanticModel] = {id(package): _SemanticModel(package)}
         self.model = self.models[id(package)]
+        self._exposure_resolving: list[_SemanticExposure] = []
+        self._exposure_cycles: set[_SemanticExposure] = set()
+        prepared = {} if _prepared is None else _prepared
+        preparing = set() if _preparing is None else _preparing
+        self._preparing = preparing
+        prepared[id(package)] = self
+        preparing.add(id(package))
         for dependency in self.dependencies:
-            prepared = _SemanticChecker(dependency, ())
+            if id(dependency) in prepared:
+                self.models[id(dependency)] = prepared[id(dependency)].model
+                continue
+            supplied = [
+                candidate
+                for candidate in self.dependencies
+                if candidate is not dependency
+            ]
+            prepared_dependency = _SemanticChecker(
+                dependency, supplied, prepared, preparing
+            )
+            self.models[id(dependency)] = prepared_dependency.model
+            prepared_dependency._resolve_implements()
+            prepared_dependency._resolve_includes()
+            prepared_dependency._resolve_exposures()
+        preparing.discard(id(package))
+        self.workspace_members = package.workspace_members
+        for member in self.workspace_members:
+            prepared = _SemanticChecker(member, ())
             prepared._resolve_implements()
             prepared._resolve_includes()
-            self.models[id(dependency)] = prepared.model
+            prepared._resolve_exposures()
+            self.models[id(member)] = prepared.model
         self.findings: list[Finding] = []
         self.resolved_sites: list[tuple[_SemanticSite, _SemanticResolution]] = []
+        self.include_targets: dict[
+            tuple[_SemanticInterface, _SemanticInterface], _SemanticTarget
+        ] = {}
         self.used_modules: dict[str, set[str]] = {module.path: set() for module in package.modules}
         self.used_interfaces: dict[str, set[_SemanticInterface]] = {module.path: set() for module in package.modules}
         self.declared_uses: dict[str, set[str]] = {}
@@ -1662,7 +2194,15 @@ class _SemanticChecker:
 
     def resolver_for(self, source: SourceFile, module: Module) -> _SemanticResolver:
         owner = self.model.by_source.get(source.path)
-        context = "interface" if owner is not None else "decision" if source.kind == "decisions" else "body"
+        context = (
+            "interface"
+            if owner is not None
+            else "workspace decision"
+            if source.kind == "workspace decisions"
+            else "decision"
+            if source.kind == "decisions"
+            else "body"
+        )
         key = source.path
         if key not in self.resolvers:
             self.resolvers[key] = _SemanticResolver(self, source, module, context, owner)
@@ -1697,10 +2237,12 @@ class _SemanticChecker:
             result.append(selector)
         return result
 
-    def run(self) -> list[Finding]:
+    def run(self, *, check_public_closure: bool = True) -> list[Finding]:
         self._check_names_and_leads()
         self._resolve_implements()
         self._resolve_includes()
+        self._check_exposure_names()
+        self._resolve_exposures()
         self._resolve_impl_items()
         self._check_body_unique_names()
         self._check_aliases()
@@ -1711,7 +2253,8 @@ class _SemanticChecker:
         self._check_cycles()
         self._check_complete_uses()
         self._check_structural_joins()
-        self._check_public_closure()
+        if check_public_closure:
+            self._check_public_closure()
         self._check_independent_modules()
         existing = {finding.key for finding in self.package.findings}
         return sorted(
@@ -1720,9 +2263,11 @@ class _SemanticChecker:
         )
 
     def _check_names_and_leads(self) -> None:
-        if not _SEMANTIC_IDENTIFIER.fullmatch(self.package.name):
+        if self.package.workspace is None and not _SEMANTIC_IDENTIFIER.fullmatch(self.package.name):
             self.error("semantic.identifiers", self.package.name, self.package.name, "package name is not a lowercase ASCII identifier")
         for module in self.package.modules:
+            if self.package.workspace is not None and module.path == "":
+                continue
             if not _SEMANTIC_IDENTIFIER.fullmatch(module.name):
                 self.error("semantic.identifiers", module.path or self.package.name, module.name, "module name is not a lowercase ASCII identifier")
             headers = [source for source in module.files if source.kind in {"header", "private header"}]
@@ -1753,6 +2298,14 @@ class _SemanticChecker:
             for name, interfaces in seen_interfaces.items():
                 if len(interfaces) > 1:
                     self.error("semantic.unique-names", interfaces[1].source, name, "module provides this interface name more than once")
+                children = [
+                    child
+                    for child in self.package.modules
+                    if child.path and self._parent_module_path(child.path) == module.path and child.name == name
+                ]
+                if children and any(not interface.default for interface in interfaces):
+                    interface = next(interface for interface in interfaces if not interface.default)
+                    self.error("semantic.unique-names", interface.source, name, "named interface collides with a sibling module")
             if module.body is not None:
                 for item in module.body.items:
                     if "." in item.name or item.name == "default":
@@ -1786,6 +2339,153 @@ class _SemanticChecker:
                     self.error("semantic.includable", interface.source, reference, resolution.detail or "includes relation does not name one visible interface")
                 else:
                     interface.includes.append(included)
+                    if len(resolution.targets) == 1:
+                        self.include_targets[(interface, included)] = resolution.targets[0]
+
+    def _check_exposure_names(self) -> None:
+        for module in self.package.modules:
+            declared: dict[tuple[str, ...], list[_SemanticExposure]] = {}
+            for exposure in self.model.exposures_by_module.get(module.path, []):
+                declared.setdefault(exposure.key, []).append(exposure)
+            for exposures in declared.values():
+                if len(exposures) > 1:
+                    for exposure in exposures[1:]:
+                        self.error(
+                            "semantic.exposure-unique",
+                            exposure.source,
+                            exposure.name,
+                            "exposure path is declared more than once by one module",
+                            exposure.line,
+                        )
+
+    def _resolve_exposure(self, exposure: _SemanticExposure) -> _SemanticResolution:
+        if exposure.resolution is not None:
+            return exposure.resolution
+        if exposure in self._exposure_resolving:
+            start = self._exposure_resolving.index(exposure)
+            self._exposure_cycles.update(self._exposure_resolving[start:])
+            return _SemanticResolution(status="exposure-cycle", detail="exposure declarations form a cycle")
+        self._exposure_resolving.append(exposure)
+        try:
+            resolver = self.resolver_for(exposure.source, exposure.module)
+            resolution = resolver.resolve(exposure.value)
+            if resolution.status == "ok":
+                if len(resolution.targets) != 1 or resolution.targets[0].kind != "interface":
+                    resolution = _SemanticResolution(
+                        status="form",
+                        detail="exposure target must be one whole interface",
+                    )
+            exposure.resolution = resolution
+            if resolution.status == "ok":
+                self._exposure_cycles.discard(exposure)
+            return resolution
+        finally:
+            self._exposure_resolving.pop()
+
+    def _resolve_exposures(self) -> None:
+        for exposure in self.model.exposures:
+            self._resolve_exposure(exposure)
+        for exposure in self.model.exposures:
+            resolution = exposure.resolution
+            if resolution is None:
+                continue
+            if exposure in self._exposure_cycles:
+                self.error(
+                    "semantic.exposure-cycle",
+                    exposure.source,
+                    exposure.name,
+                    resolution.detail or "exposure declarations form a cycle",
+                    exposure.line,
+                )
+                continue
+            if resolution.status != "ok":
+                self.error(
+                    "semantic.exposure-target",
+                    exposure.source,
+                    exposure.value,
+                    resolution.detail or "exposure does not resolve to one visible whole interface",
+                    exposure.line,
+                )
+                continue
+        self._check_composed_exposure_paths()
+
+    def _check_composed_exposure_paths(self) -> None:
+        paths: dict[tuple[int, str, str], list[tuple[_SemanticExposure, _SemanticTarget, Package]]] = {}
+
+        def visit(
+            model: _SemanticModel,
+            module: Module,
+            prefix: str,
+            stack: frozenset[tuple[int, str]],
+            namespace: Package,
+            namespace_root: str,
+        ) -> None:
+            marker = (id(model.package), module.path)
+            if marker in stack:
+                return
+            next_stack = stack | {marker}
+            for exposure in model.exposures_by_module.get(module.path, []):
+                target = exposure.target
+                if target is None:
+                    continue
+                path = f"{prefix}.{exposure.name}" if prefix else exposure.name
+                paths.setdefault((id(namespace), namespace_root, path), []).append(
+                    (exposure, target, model.package)
+                )
+                if target.kind == "module" and target.module is not None:
+                    target_model = self.models.get(id(target.package), model)
+                    visit(
+                        target_model,
+                        target.module,
+                        path,
+                        next_stack,
+                        namespace,
+                        namespace_root,
+                    )
+                elif target.kind == "interface" and target.interface is not None:
+                    for item in model.interface_items(target.interface):
+                        item_path = f"{path}.{item.name}"
+                        paths.setdefault((id(namespace), namespace_root, item_path), []).append(
+                            (exposure, item, model.package)
+                        )
+
+        for model in self.models.values():
+            for module in model.package.modules:
+                visit(model, module, "", frozenset(), model.package, module.path)
+        for (_package_id, _namespace_root, path), declarations in paths.items():
+            distinct = {self._target_key(target) for _, target, _ in declarations}
+            if len(distinct) < 2:
+                continue
+            for exposure, _target, owner in declarations:
+                if owner is not self.package:
+                    continue
+                self.error(
+                    "semantic.exposure-unique",
+                    exposure.source,
+                    exposure.name,
+                    f"composed exposure path {path} identifies multiple targets",
+                    exposure.line,
+                )
+
+    @staticmethod
+    def _same_target(left: _SemanticTarget, right: _SemanticTarget) -> bool:
+        return _SemanticChecker._target_key(left) == _SemanticChecker._target_key(right)
+
+    @staticmethod
+    def _target_key(target: _SemanticTarget) -> tuple:
+        return (
+            id(target.package),
+            target.kind,
+            target.module.path if target.module is not None else None,
+            target.interface.source.path if target.interface is not None else None,
+            id(target.item) if target.item is not None else None,
+            target.decision.id if target.decision is not None else None,
+            target.dependency.raw if target.dependency is not None else None,
+        )
+
+    @staticmethod
+    def _parent_module_path(path: str) -> str:
+        return path.rsplit("/", 1)[0] if "/" in path else ""
 
     def _resolve_impl_items(self) -> None:
         for module in self.package.modules:
@@ -1854,13 +2554,19 @@ class _SemanticChecker:
                     self.error("semantic.alias-unique", source, alias.name, "alias collides with a visible dependency or local reference name")
                 resolution = resolver._resolve_alias(alias.name, ())
                 if resolution.status == "alias-cycle":
-                    self.error("semantic.alias-cycle", source, alias.name, resolution.detail)
+                    path = resolution.detail.split(" -> ")
+                    repeated = path[-1]
+                    participants = path[path.index(repeated) : -1] if repeated in path[:-1] else []
+                    if alias.name in participants:
+                        self.error("semantic.alias-cycle", source, alias.name, resolution.detail)
                 elif resolution.status == "ambiguous":
                     self.error("semantic.alias-ambiguous", source, alias.name, resolution.detail)
                 elif resolution.status in {"unresolved", "form", "sight", "wrong-dependency"}:
                     self.error("semantic.alias-target", source, alias.name, resolution.detail)
 
     def _local_names(self, resolver: _SemanticResolver) -> set[str]:
+        if resolver.context == "workspace decision":
+            return {member.name for member in self.workspace_members}
         names = {selector.id.rsplit("/", 1)[-1] for selector in self.package.dependencies}
         for interface in self.model.by_module.get(resolver.module.path, []):
             names.add("default" if interface.default else interface.name)
@@ -1874,9 +2580,8 @@ class _SemanticChecker:
                 names.add(target.name)
                 if target.module is not None and target.module.path == "":
                     names.add(self.package.name)
-        for interface in self.model.root_interfaces():
-            if not interface.default and resolver._visible(resolver._interface_target(interface), True, False):
-                names.add(interface.name)
+        for exposure in self.model.exposures_by_module.get(resolver.module.path, []):
+            names.add(exposure.key[0])
         return names
 
     def _decision_file_mnemonic(self, source: SourceFile) -> str | None:
@@ -1921,12 +2626,20 @@ class _SemanticChecker:
         sites: list[_SemanticSite] = []
         for module in self.package.modules:
             for source in module.files:
-                if source.kind not in {"header", "private header", "body", "decisions"}:
+                if source.kind not in {"header", "private header", "body", "decisions", "workspace decisions"}:
                     continue
                 owner = self.model.by_source.get(source.path)
-                context = "interface" if owner is not None else "decision" if source.kind == "decisions" else "body"
+                context = (
+                    "interface"
+                    if owner is not None
+                    else "workspace decision"
+                    if source.kind == "workspace decisions"
+                    else "decision"
+                    if source.kind == "decisions"
+                    else "body"
+                )
                 ranges: list[tuple[int, int, int]] = []
-                if source.kind == "decisions":
+                if source.kind in {"decisions", "workspace decisions"}:
                     ranges = [(decision.line, decision.end_line, decision.line - 1) for decision in source.decisions if decision.active]
                 else:
                     ranges = [(1, len(source.content.splitlines()), 0)]
@@ -1944,7 +2657,7 @@ class _SemanticChecker:
                             continue
                         in_item = any(item.line <= physical <= item.end_line for item in source.items)
                         sites.append(_SemanticSite(source, module, reference, physical, context, owner, in_item))
-                if source.kind == "decisions":
+                if source.kind in {"decisions", "workspace decisions"}:
                     mnemonic = self._decision_file_mnemonic(source)
                     if mnemonic is not None:
                         for decision in source.decisions:
@@ -2006,8 +2719,60 @@ class _SemanticChecker:
                 return True
         return False
 
+    @staticmethod
+    def _decision_item_references(text: str) -> tuple[list[tuple[str, bool]], str]:
+        """Return bracketed and edition-owned bare references and their join shape."""
+
+        references = [(reference, False) for reference in extract_refs(text)]
+        shape = re.sub(r"\[[^\[\]\n]+\](?!\()", "\x00", text.strip())
+        core_words = "|".join(re.escape(word) for word in sorted(_MODEL_CORE_WORDS))
+        bare_pattern = re.compile(rf"(?<![\w-])(?:{core_words})(?![\w-])")
+
+        def replace_bare(match: re.Match[str]) -> str:
+            references.append((match.group(0), True))
+            return "\x00"
+
+        return references, bare_pattern.sub(replace_bare, shape)
+
+    def _resolve_decision_reference(
+        self,
+        resolver: _SemanticResolver,
+        reference: str,
+        *,
+        bare: bool,
+    ) -> _SemanticResolution:
+        """Resolve a bare core word to its edition item, not a local lookalike."""
+
+        if bare and reference in _MODEL_CORE_WORDS:
+            interface_name = "graph" if reference in {"workspace", "package"} else "kernel"
+
+            def canonical(model: _SemanticModel) -> list[_SemanticTarget]:
+                return [
+                    model.item_target(interface, item)
+                    for interface in model.interfaces
+                    if interface.module.name == "model" and interface.name == interface_name
+                    for item in interface.source.items
+                    if item.name == reference
+                ]
+
+            local = _semantic_unique(canonical(self.model))
+            if len(local) == 1:
+                return _SemanticResolution(local)
+            if len(local) > 1:
+                return _SemanticResolution(status="ambiguous", detail="core word has multiple edition items")
+            foreign = _semantic_unique(
+                target
+                for model in self.models.values()
+                if model is not self.model and model.package.name == "language"
+                for target in canonical(model)
+            )
+            if len(foreign) == 1:
+                return _SemanticResolution(foreign)
+            if len(foreign) > 1:
+                return _SemanticResolution(status="ambiguous", detail="core word has multiple edition items")
+        return resolver.resolve(reference)
+
     def _check_decision_statements(self) -> None:
-        reference_pattern = re.compile(r"\[[^\[\]\n]+\](?!\()")
         for module in self.package.modules:
             for source in module.files:
                 if source.kind != "decisions":
@@ -2027,8 +2792,7 @@ class _SemanticChecker:
                         )
                         continue
                     stated_by = fields[0][1]
-                    references = extract_refs(stated_by)
-                    shape = reference_pattern.sub("\x00", stated_by.strip())
+                    references, shape = self._decision_item_references(stated_by)
                     if not references or not re.fullmatch(
                         r"\x00(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+)\x00)*\.?",
                         shape,
@@ -2040,8 +2804,10 @@ class _SemanticChecker:
                             "Stated by must hold item references with only permitted joining punctuation and words",
                             decision.line,
                         )
-                    for reference in references:
-                        resolution = resolver.resolve(reference)
+                    for reference, bare in references:
+                        resolution = self._resolve_decision_reference(
+                            resolver, reference, bare=bare
+                        )
                         if resolution.status != "ok" or not any(
                             target.kind in {"item", "body-item"}
                             for target in resolution.targets
@@ -2086,18 +2852,6 @@ class _SemanticChecker:
                 if target_node not in graph:
                     continue
                 graph[origin_node].add(target_node)
-                if (
-                    origin.view == "Structure"
-                    and target.source is site.source
-                    and target.item.line > origin.line
-                ):
-                    self.error(
-                        "semantic.definition-order",
-                        site.source,
-                        origin.name,
-                        f"Structure item refers to later item {target.item.name}",
-                        site.line,
-                    )
 
         counter = 0
         indices: dict[tuple[str, int], int] = {}
@@ -2342,54 +3096,337 @@ class _SemanticChecker:
                     item.line,
                 )
 
-    def _check_public_closure(self) -> None:
-        facades = self.model.root_interfaces()
-        if not facades:
-            return
-        exposed: set[tuple[str, int, str]] = set()
-        for facade in facades:
-            for target in self.model.interface_items(facade):
-                if target.source is not None and target.item is not None:
-                    exposed.add((target.source.path, id(target.item), target.name))
-        selected: dict[tuple[str, int, str], tuple[_SemanticSite, _SemanticResolution]] = {}
-        resolved_by_site = {(site.source.path, site.line, site.reference): resolution for site, resolution in self.resolved_sites}
-        for site, resolution in self.resolved_sites:
-            if site.owner is None:
+    def _available_public_targets(self, model: _SemanticModel) -> set[tuple]:
+        available: set[tuple] = set()
+        for exposure in model.reachable_exposures():
+            target = exposure.target
+            if (
+                target is None
+                or target.kind != "interface"
+                or target.interface is None
+            ):
                 continue
-            is_facade_source = site.owner in facades and site.source is site.owner.source
-            is_included_item = site.in_item and any(site.owner in self._included_closure(facade) for facade in facades)
-            if is_facade_source or is_included_item:
-                selected[(site.source.path, site.line, site.reference)] = (site, resolution)
-        for site, resolution in selected.values():
-            if all(self._public_target(target, exposed) for target in resolution.targets):
-                continue
-            if any(target.kind == "body-item" for target in resolution.targets) and any(self._public_target(target, exposed) for target in resolution.targets):
-                continue
-            self.error("semantic.public-closure", site.source, site.reference, "public facade reference escapes the exposed item surface", site.line)
-
-    def _included_closure(self, facade: _SemanticInterface) -> set[_SemanticInterface]:
-        result: set[_SemanticInterface] = set()
-
-        def visit(interface: _SemanticInterface) -> None:
-            for included in interface.includes:
-                if included not in result:
-                    result.add(included)
-                    visit(included)
-
-        visit(facade)
-        return result
-
-    def _public_target(self, target: _SemanticTarget, exposed: set[tuple[str, int, str]]) -> bool:
-        if target.kind != "item" or target.item is None or target.source is None or target.interface is None:
-            return False
-        if target.package is not self.package:
-            model = self.models[id(target.package)]
-            return any(
-                exposed_target.item is target.item
-                for facade in model.root_interfaces()
-                for exposed_target in model.interface_items(facade)
+            available.add(self._target_key(target))
+            available.update(
+                self._target_key(item)
+                for item in model.interface_items(target.interface)
             )
-        return (target.source.path, id(target.item), target.name) in exposed
+        return available
+
+    def _target_available(self, target: _SemanticTarget, available: set[tuple]) -> bool:
+        if target.kind == "dependency":
+            return target.dependency in self.package.dependencies
+        if target.kind == "member":
+            return any(target.package is member for member in self.workspace_members)
+        if target.kind not in {"module", "interface", "item"}:
+            return False
+        if target.kind == "module":
+            return target.module is not None and target.module.path == ""
+        model = self.models.get(id(target.package))
+        if model is None:
+            return False
+        return self._target_key(target) in self._available_public_targets(model)
+
+    @staticmethod
+    def _exposure_descriptor(exposure: _SemanticExposure) -> tuple:
+        return (
+            exposure.module.path,
+            exposure.source.path,
+            exposure.key,
+            exposure.value,
+        )
+
+    def _exposure_scope_for_target(self, target: _SemanticTarget) -> list[_SemanticExposure]:
+        """Return only root chains and descendants needed for one foreign target."""
+
+        exposures = {
+            self._exposure_descriptor(exposure): exposure
+            for exposure in self.model.reachable_exposures()
+        }
+        goals: list[_SemanticExposure] = []
+        if target.exposure is not None:
+            goal = exposures.get(self._exposure_descriptor(target.exposure))
+            if goal is not None:
+                goals.append(goal)
+        if not goals:
+            direct = [
+                exposure
+                for exposure in exposures.values()
+                if exposure.target is not None
+                and self._same_target(exposure.target, target)
+            ]
+            goals.extend(direct)
+        if not goals and target.kind == "item":
+            for exposure in exposures.values():
+                exposed = exposure.target
+                if exposed is None or exposed.kind != "interface" or exposed.interface is None:
+                    continue
+                if any(self._same_target(item, target) for item in self.model.interface_items(exposed.interface)):
+                    goals.append(exposure)
+
+        related: set[_SemanticExposure] = set()
+
+        def collect_ancestors(
+            exposure: _SemanticExposure,
+            stack: frozenset[_SemanticExposure],
+        ) -> bool:
+            if exposure in goals:
+                related.add(exposure)
+                return True
+            if exposure in stack:
+                return False
+            children = list(exposure.dependencies)
+            exposed = exposure.target
+            if (
+                exposed is not None
+                and exposed.package is self.package
+                and exposed.kind == "module"
+                and exposed.module is not None
+            ):
+                children.extend(
+                    candidate
+                    for candidate in self.model.exposures_by_module.get(exposed.module.path, [])
+                    if candidate.target is not None
+                )
+            found = False
+            for child in children:
+                if collect_ancestors(child, stack | {exposure}):
+                    found = True
+            if found:
+                related.add(exposure)
+            return found
+
+        for root in self.model.root_exposures():
+            collect_ancestors(root, frozenset())
+        scope = set(related)
+        for goal in goals:
+            scope.update(self.model.reachable_exposures([goal]))
+        return [
+            exposure
+            for exposure in self.model.reachable_exposures()
+            if exposure in scope
+        ]
+
+    def _compute_public_closure(
+        self,
+        exposure_scope: Iterable[_SemanticExposure] | None = None,
+    ) -> tuple[dict[tuple[str, int, str], tuple[_SemanticSite, _SemanticResolution]], PublicReading]:
+        sources: dict[str, SourceFile] = {}
+        contract_sources: set[str] = set()
+        module_paths: set[str] = set()
+        foreign_units: dict[tuple[str, str], PublicUnit] = {}
+        foreign_modules: dict[tuple[str, str], PublicModule] = {}
+        foreign_checkers: dict[int, _SemanticChecker] = {}
+        foreign_readings: dict[tuple, PublicReading] = {}
+        selected_exposures: list[_SemanticExposure] = []
+        selected_exposure_set: set[_SemanticExposure] = set()
+
+        def add_module(path: str) -> None:
+            while path:
+                module_paths.add(path)
+                path = self._parent_module_path(path)
+
+        def merge_foreign(
+            target: _SemanticTarget,
+            through: _SemanticExposure | None = None,
+        ) -> None:
+            if through is None and target.exposure_chain:
+                for exposure in target.exposure_chain:
+                    merge_foreign(target, exposure)
+                return
+            if through is None:
+                package = target.package
+            else:
+                owner = next(
+                    (
+                        model
+                        for model in self.models.values()
+                        if through in model.exposures
+                    ),
+                    None,
+                )
+                if owner is None:
+                    return
+                package = owner.package
+                target = replace(target, exposure=through)
+            if id(package) not in foreign_checkers:
+                supplied = [
+                    candidate for candidate in self.dependencies if candidate is not package
+                ]
+                checker = _SemanticChecker(package, supplied)
+                checker.run(check_public_closure=False)
+                foreign_checkers[id(package)] = checker
+            checker = foreign_checkers[id(package)]
+            scope = checker._exposure_scope_for_target(target)
+            if not scope:
+                return
+            key = (
+                id(package),
+                tuple(sorted(self._exposure_descriptor(exposure) for exposure in scope)),
+            )
+            if key not in foreign_readings:
+                _selected, foreign_readings[key] = checker._compute_public_closure(scope)
+            reading = foreign_readings[key]
+            for unit in reading.units:
+                key = (unit.package_id, unit.path)
+                previous = foreign_units.get(key)
+                if previous is not None:
+                    unit = replace(
+                        previous,
+                        dependencies=tuple(
+                            sorted(set(previous.dependencies) | set(unit.dependencies))
+                        ),
+                        exposures=tuple(
+                            sorted(set(previous.exposures) | set(unit.exposures))
+                        ),
+                    )
+                foreign_units[key] = unit
+            for module in reading.modules:
+                foreign_modules[(module.package_id, module.path)] = module
+
+        def add_source(source: SourceFile, *, contract: bool = True) -> None:
+            if source.path not in sources:
+                sources[source.path] = source
+                add_module(source.module)
+            if not contract or source.path in contract_sources:
+                return
+            contract_sources.add(source.path)
+            owner = self.model.by_source.get(source.path)
+            if owner is None:
+                return
+            pending = list(owner.includes)
+            seen: set[_SemanticInterface] = set()
+            while pending:
+                included = pending.pop()
+                if included in seen:
+                    continue
+                seen.add(included)
+                if included.package is self.package:
+                    add_source(included.source)
+                    pending.extend(included.includes)
+                    continue
+                target = self.include_targets.get((owner, included))
+                if target is None:
+                    target = _SemanticTarget(
+                        "interface",
+                        included.package,
+                        included.name,
+                        module=included.module,
+                        interface=included,
+                        source=included.source,
+                        external=True,
+                    )
+                merge_foreign(target)
+
+        def add_exposure(exposure: _SemanticExposure) -> None:
+            if exposure in selected_exposure_set:
+                return
+            selected_exposure_set.add(exposure)
+            selected_exposures.append(exposure)
+            add_source(exposure.source, contract=False)
+            target = exposure.target
+            if target is None:
+                return
+            if target.package is not self.package:
+                if self._target_available(target, set()):
+                    merge_foreign(target)
+                return
+            if target.source is not None:
+                add_source(target.source)
+
+        initial_exposures = (
+            self.model.reachable_exposures()
+            if exposure_scope is None
+            else list(exposure_scope)
+        )
+        for exposure in initial_exposures:
+            if any(source is exposure.source for source in self.package.files):
+                add_exposure(exposure)
+            elif exposure.target is not None and self._target_available(exposure.target, set()):
+                merge_foreign(exposure.target)
+
+        available = self._available_public_targets(self.model)
+        selected: dict[tuple[str, int, str], tuple[_SemanticSite, _SemanticResolution]] = {}
+        changed = True
+        while changed:
+            changed = False
+            before = len(sources)
+            for site, resolution in self.resolved_sites:
+                if site.source.path not in sources:
+                    continue
+                key = (site.source.path, site.line, site.reference)
+                selected[key] = (site, resolution)
+                for target in resolution.targets:
+                    if not self._target_available(target, available):
+                        continue
+                    if target.package is not self.package:
+                        if target.kind not in {"dependency", "member"}:
+                            merge_foreign(target)
+                        continue
+                    for needed in self._exposure_scope_for_target(target):
+                        add_exposure(needed)
+                    if target.source is not None:
+                        add_source(target.source)
+                    if target.kind == "module" and target.module is not None:
+                        add_module(target.module.path)
+            changed = len(sources) != before
+
+        own_dependencies = tuple(sorted(selector.raw for selector in self.package.dependencies))
+        own_units = [
+            PublicUnit(
+                identity=f"{self.package.id}:source:{path}",
+                path=path,
+                locator=f"{self.package.id}:source:{path}",
+                package_id=self.package.id,
+                dependencies=own_dependencies,
+                exposures=tuple(
+                    sorted(
+                        exposure.name
+                        for exposure in selected_exposures
+                        if exposure.source.path == path
+                    )
+                ),
+            )
+            for path in sources
+        ]
+        own_modules = [
+            PublicModule(
+                identity=f"{self.package.id}:module:{path}",
+                path=path,
+                locator=f"{self.package.id}:module:{path}",
+                package_id=self.package.id,
+                name=path.rsplit("/", 1)[-1],
+            )
+            for path in module_paths
+        ]
+        units = sorted(
+            [*own_units, *foreign_units.values()],
+            key=lambda unit: (unit.package_id, unit.path),
+        )
+        modules = sorted(
+            [*own_modules, *foreign_modules.values()],
+            key=lambda module: (module.package_id, module.path),
+        )
+        reading = PublicReading(
+            units=tuple(units),
+            dependencies=own_dependencies,
+            modules=tuple(modules),
+        )
+        return selected, reading
+
+    def _check_public_closure(self) -> None:
+        selected, self.public_reading = self._compute_public_closure()
+        available = self._available_public_targets(self.model)
+        for site, resolution in selected.values():
+            if all(self._target_available(target, available) for target in resolution.targets):
+                continue
+            self.error(
+                "semantic.public-closure",
+                site.source,
+                site.reference,
+                "public reading reference does not resolve from the supplied units and public dependencies",
+                site.line,
+            )
 
     def _check_independent_modules(self) -> None:
         for site, resolution in self.resolved_sites:
@@ -2403,9 +3440,34 @@ class _SemanticChecker:
 
 
 def semantic_findings(package: Package, dependency_packages: Iterable[Package] = ()) -> list[Finding]:
-    """Return local semantic findings; supplied dependencies are never loaded here."""
+    """Return package-owned local and supplied-dependency semantic findings."""
 
-    return _SemanticChecker(package, dependency_packages).run()
+    dependencies = tuple(dependency_packages)
+
+    def owned_run(
+        current: Package, supplied: tuple[Package, ...]
+    ) -> list[Finding]:
+        return [
+            replace(finding, package_id=current.id)
+            for finding in _SemanticChecker(current, supplied).run()
+        ]
+
+    findings = owned_run(package, dependencies)
+    for dependency in dependencies:
+        supplied = tuple(candidate for candidate in dependencies if candidate is not dependency)
+        findings.extend(owned_run(dependency, supplied))
+    return _sorted_findings(findings)
+
+
+def public_reading(
+    package: Package,
+    dependency_packages: Iterable[Package] = (),
+) -> PublicReading:
+    """Collect identified canonical public units and public dependency metadata."""
+
+    checker = _SemanticChecker(package, dependency_packages)
+    checker.run()
+    return checker.public_reading
 
 
 @dataclass(frozen=True)
@@ -2423,13 +3485,19 @@ class _ItemLocation:
 
 
 def _decision_locations(package: Package) -> list[_DecisionLocation]:
-    return [
+    locations = [
         _DecisionLocation(module, source, decision)
         for module in package.modules
         for source in module.files
-        if source.kind == "decisions"
+        if source.kind in {"decisions", "workspace decisions"}
         for decision in source.decisions
     ]
+    locations.extend(
+        _DecisionLocation(module, source, decision)
+        for module, source in package.related_decisions
+        for decision in source.decisions
+    )
+    return locations
 
 
 def _item_locations(package: Package) -> list[_ItemLocation]:
@@ -2484,18 +3552,37 @@ def _lifetime_finding(
     )
 
 
+def _successor_locations(
+    index: dict[tuple[str, str], list[_DecisionLocation]],
+    location: _DecisionLocation,
+    successor: str,
+) -> list[_DecisionLocation]:
+    """Resolve locally first; a pointer-only move may cross collection bounds."""
+
+    local = index.get((location.module.path, successor), [])
+    if local or not _pointer_only_stub(location.decision):
+        return local
+    return [
+        candidate
+        for locations in index.values()
+        for candidate in locations
+        if candidate.decision.id == successor
+    ]
+
+
 def _successor_cycles(
     index: dict[tuple[str, str], list[_DecisionLocation]]
 ) -> set[tuple[str, str]]:
     graph: dict[tuple[str, str], set[tuple[str, str]]] = {key: set() for key in index}
     for key, locations in index.items():
-        module_path, decision_id = key
+        _module_path, decision_id = key
         for location in locations:
             successor = location.decision.successor
             if successor is not None and successor != decision_id:
-                target = (module_path, successor)
-                if target in index:
-                    graph[key].add(target)
+                targets = _successor_locations(index, location, successor)
+                if len(targets) == 1:
+                    target = targets[0]
+                    graph[key].add((target.module.path, successor))
 
     counter = 0
     indices: dict[tuple[str, str], int] = {}
@@ -2552,8 +3639,12 @@ def _pointer_only_stub(decision: Decision) -> bool:
 
 def _decision_history_matches(old: Decision, current: Decision) -> bool:
     if _pointer_only_stub(current):
+        # Pointer-only stubs carry no active choice whose text can be replaced.
+        # A dependent pointer may migrate to the successor of its former target.
+        if _pointer_only_stub(old):
+            return True
         # B10 permits committed prose to leave the active file for Git history.
-        # The successor checks separately enforce link immutability and freshness.
+        # Remaining successor checks enforce existence, freshness and cycles.
         return old.successor is None or old.successor == current.successor
     unchanged = _canonical_decision(old.text) == _canonical_decision(current.text)
     gained_successor = (
@@ -2578,6 +3669,41 @@ def _committed_predecessor(
         ),
         previous[0],
     )
+
+
+def _dependent_pointer_migration(
+    index: dict[tuple[str, str], list[_DecisionLocation]],
+    location: _DecisionLocation,
+    old: Decision,
+    current: Decision,
+) -> bool:
+    """Accept only migration to the active end of the former successor's chain."""
+
+    if (
+        not _pointer_only_stub(old)
+        or not _pointer_only_stub(current)
+        or old.successor is None
+        or current.successor is None
+    ):
+        return False
+    seen = {current.id}
+    successor = old.successor
+    followed_supersession = False
+    while True:
+        locations = _successor_locations(index, location, successor)
+        if len(locations) != 1:
+            return False
+        location = locations[0]
+        candidate = location.decision
+        if candidate.active:
+            return followed_supersession and current.successor == candidate.id
+        if not _pointer_only_stub(candidate) or candidate.successor is None:
+            return False
+        if candidate.id in seen:
+            return False
+        seen.add(candidate.id)
+        followed_supersession = True
+        successor = candidate.successor
 
 
 def decision_lifetime_findings(
@@ -2618,12 +3744,12 @@ def decision_lifetime_findings(
                         location,
                         "successor differs from its predecessor",
                     )
-                elif (module_path, successor) not in current:
+                elif not _successor_locations(current, location, successor):
                     _lifetime_finding(
                         findings,
                         "lifetime.successor-missing",
                         location,
-                        f"successor {successor} does not exist in the same module",
+                        f"successor {successor} does not exist in a visible decision collection",
                     )
 
             previous_locations = committed.get(key)
@@ -2654,13 +3780,24 @@ def decision_lifetime_findings(
                         ),
                         "error" if altered_history else "review",
                     )
+            pointer_migration = _dependent_pointer_migration(
+                current, location, old, decision
+            )
             if old.successor is not None and successor != old.successor:
-                _lifetime_finding(
-                    findings,
-                    "lifetime.successor-changed",
-                    location,
-                    "committed successor link was changed or removed",
-                )
+                if not pointer_migration:
+                    _lifetime_finding(
+                        findings,
+                        "lifetime.successor-changed",
+                        location,
+                        "committed successor link was changed or removed",
+                    )
+                elif successor in baseline_ids:
+                    _lifetime_finding(
+                        findings,
+                        "lifetime.successor-stale",
+                        location,
+                        f"successor {successor} was already committed and is not fresh",
+                    )
             elif old.successor is None and successor is not None and successor != decision_id:
                 if successor in baseline_ids:
                     _lifetime_finding(
@@ -2728,10 +3865,13 @@ def _stated_by_decisions(
         if stated_by is None:
             continue
         resolver = checker.resolver_for(location.source, location.module)
-        for reference in extract_refs(stated_by):
-            if "." not in reference and location.module.path != item_location.module.path:
+        references, _shape = checker._decision_item_references(stated_by)
+        for reference, bare in references:
+            if not bare and "." not in reference and location.module.path != item_location.module.path:
                 continue
-            resolution = resolver.resolve(reference)
+            resolution = checker._resolve_decision_reference(
+                resolver, reference, bare=bare
+            )
             if resolution.status != "ok":
                 continue
             if any(
@@ -2861,7 +4001,7 @@ def _definition_spans(source: SourceFile) -> list[tuple[int, int]]:
 
 
 def _prose_regions(source: SourceFile) -> list[tuple[str, int]]:
-    if source.kind != "decisions":
+    if source.kind not in {"decisions", "workspace decisions"}:
         return [(source.content, 1)]
     lines = source.content.splitlines(keepends=True)
     return [
@@ -2932,7 +4072,7 @@ def _module_dependency_reaches(
     return False
 
 
-def _compound_reference(
+def _item_reference(
     checker: _SemanticChecker,
     source: SourceFile,
     compound: str,
@@ -2945,6 +4085,14 @@ def _compound_reference(
     owner = checker.model.by_source.get(source.path)
     declared_uses = checker.declared_uses.get(module.path)
     references = [compound]
+    if source.kind == "workspace decisions":
+        for member in checker.workspace_members:
+            model = checker.models[id(member)]
+            for target, public_path in model.public_item_paths():
+                if target.name != compound:
+                    continue
+                references.append(f"{member.name}.{public_path}")
+                references.append(f"{member.id}.{public_path}")
     for interface in checker.model.interfaces:
         if interface.module is module or not any(
             item.name == compound for item in interface.source.items
@@ -2958,7 +4106,9 @@ def _compound_reference(
                 prefix += f".{interface.name}"
         references.append(f"{prefix}.{compound}")
 
-    for reference in dict.fromkeys(references):
+    candidates = dict.fromkeys(references)
+    ordered = sorted(candidates) if source.kind == "workspace decisions" else candidates
+    for reference in ordered:
         resolution = resolver.resolve(reference)
         if resolution.status != "ok":
             continue
@@ -2969,6 +4119,8 @@ def _compound_reference(
         ]
         if not targets:
             continue
+        if source.kind == "workspace decisions":
+            return reference
         if any(
             target.kind == "item"
             and target.interface is not None
@@ -3002,22 +4154,25 @@ def _bare_candidates(package: Package, review: bool) -> list[Finding]:
     checker.run()
     _, reference_graph = checker._interface_graphs()
     names = {location.item.name for location in _item_locations(package)}
+    for member in package.workspace_members:
+        model = checker.models[id(member)]
+        names.update(target.name for target in model.public_items())
     compounds = [name for name in names if re.split(r"[ -]+", name.strip()) and len(re.split(r"[ -]+", name.strip())) > 1]
     singles = [
         name
         for name in names
-        if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) and name.casefold() not in _PROSE_CORE_WORDS
+        if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) and name.casefold() not in _PROSE_CORE_WORDS | _MODEL_CORE_WORDS
     ]
     findings: list[Finding] = []
     for source in package.files:
-        if source.kind not in {"header", "private header", "body", "decisions"}:
+        if source.kind not in {"header", "private header", "body", "decisions", "workspace decisions"}:
             continue
         definitions = _definition_spans(source)
         for region, base_line in _prose_regions(source):
             masked = _mask_prose(region)
             candidates: list[_BareCandidate] = []
             for name in compounds:
-                reference = _compound_reference(checker, source, name, reference_graph)
+                reference = _item_reference(checker, source, name, reference_graph)
                 if reference is None:
                     continue
                 words = re.split(r"[ -]+", name.strip())
@@ -3048,6 +4203,9 @@ def _bare_candidates(package: Package, review: bool) -> list[Finding]:
                     )
             if review:
                 for name in singles:
+                    suggestion = name
+                    if source.kind == "workspace decisions":
+                        suggestion = _item_reference(checker, source, name, reference_graph) or name
                     expression = "(?:" + "|".join(map(re.escape, _word_forms(name))) + ")"
                     pattern = re.compile(rf"(?<![\w-]){expression}(?![\w-])")
                     for match in pattern.finditer(masked):
@@ -3065,7 +4223,7 @@ def _bare_candidates(package: Package, review: bool) -> list[Finding]:
                                     "review",
                                     source.path,
                                     name,
-                                    f"ambiguous bare item name; write [{name}] if this use names the item",
+                                    f"ambiguous bare item name; write [{suggestion}] if this use names the item",
                                     line,
                                 ),
                             )
@@ -3096,7 +4254,7 @@ def _bare_candidates(package: Package, review: bool) -> list[Finding]:
 
 
 def _sorted_findings(findings: Iterable[Finding]) -> list[Finding]:
-    unique: dict[tuple[str, str, str, str, str], Finding] = {}
+    unique: dict[tuple[str, str, str, str, str, str], Finding] = {}
     for finding in findings:
         previous = unique.get(finding.key)
         if previous is None or (finding.line and (not previous.line or finding.line < previous.line)):
@@ -3122,10 +4280,16 @@ def check_package(
     baseline: Package | None = None,
     dependency_packages: Iterable[Package] = (),
     review: bool = False,
+    baseline_dependency_packages: Iterable[Package] | None = None,
 ) -> list[Finding]:
     """Aggregate current checks, suppressing only exact committed finding keys."""
 
     dependencies = tuple(dependency_packages)
+    baseline_dependencies = (
+        dependencies
+        if baseline_dependency_packages is None
+        else tuple(baseline_dependency_packages)
+    )
     current = [
         *structured_findings(package),
         *semantic_findings(package, dependencies),
@@ -3134,7 +4298,7 @@ def check_package(
     if baseline is not None:
         committed = [
             *structured_findings(baseline),
-            *semantic_findings(baseline, dependencies),
+            *semantic_findings(baseline, baseline_dependencies),
             *prose_findings(baseline, review=review),
         ]
         committed_keys = {finding.key for finding in committed}

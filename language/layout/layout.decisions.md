@@ -1,5 +1,5 @@
-**LAYOUT-1. Lay a [package] out as one directory, with the directories below its top, and say each [source file]'s kind in its name.**
-*Stated by* [package], [manifest], [modules], [lock], [build], [header], [private header], [body], [decisions] and [source file].
+**LAYOUT-1. Lay a [package] out as one directory, with the directories below its top, and say each canonical [source file]'s kind in its name.**
+*Stated by* [package], [manifest], [modules], [lock], [assembly], [header], [private header], [body], [decisions] and [source file].
 *Because* a name says what a [source file] is, as `.h` and `.c` do in C, so a person browsing a directory or a row of tabs sees each one's kind without opening it.
 *Because* each [source file] then has one kind, read whole, its history the history of one thing.
 *Because* the [body] and the [decisions] stand apart, so rewriting a [body] whole never touches the [decisions].
@@ -8,11 +8,11 @@
 
 **LAYOUT-2.** *Superseded by* LAYOUT-18
 
-**LAYOUT-18. Call `package.quoll.toml` the [package]'s public [manifest].**
-*Stated by* [manifest].
-*Because* it is the one public [source file] standing for its [package], as a [package] manager's [manifest] stands for its own unit, so the word is the one engineers already give such a file.
-*Accepting* a word given to one file alone, at the top, and a compound suffix that marks both its format and its ownership.
-*Rejected* a map, which reads as a generic type rather than one [package]'s file; a name after the file itself, which says only where it is; a card, a word nobody gives a file; and a Markdown shell for wholly structured metadata.
+**LAYOUT-18. Use `package.quoll.toml` for the canonical [package]'s public [manifest] and a quollified native [package]'s [native overlay], keeping their grammars apart.**
+*Stated by* [manifest] and [native overlay].
+*Because* the canonical [manifest] is the one public [source file] standing for its [package], while the same name at a native [package]'s top supplies the common discovery marker without making that overlay a canonical metadata mirror.
+*Accepting* a word given to one canonical file kind, a compound suffix that marks both its format and its ownership, and a [native overlay] whose concrete schema waits for its first profile.
+*Rejected* a map, which reads as a generic type rather than one [package]'s file; a name after the file itself, which says only where it is; a card, a word nobody gives a file; a Markdown shell for wholly structured canonical metadata; a complete canonical metadata mirror beside every native manifest, which creates two authorities; and no common [native overlay], which loses reliable discovery.
 
 **LAYOUT-3. Say what a [package] is on disk in the language's own notation, and leave how a tool finds it to the tool.**
 *Stated by* [path].
@@ -34,9 +34,9 @@
 *Rejected* taking in everything found, which takes a repository's `.git` into the [package].
 *Formerly* the renderer's FILE-10.
 
-**LAYOUT-6. Stand each fixed file at the top of the [package] or [workspace] it describes.**
+**LAYOUT-6. Stand each fixed file and the [assembly] at the top of the [package] or [workspace] it describes.**
 *Stated by* [top only].
-*Because* each name then makes one [source file] of the unit whose top holds it, so no second [manifest], [modules], [lock] or [workspace] file stands below that top.
+*Because* each name then makes one [source file] of the unit whose top holds it, so no second [manifest], [modules], [lock], [assembly] or [workspace] file stands below that top.
 *Rejected* finding fixed files by their names anywhere, which makes a second [manifest] of one below the top.
 *Formerly* the renderer's FILE-11.
 
@@ -67,10 +67,12 @@
 *Accepting* an explicit membership list and fixed [workspace] files, without a second naming scheme for the group.
 *Rejected* [package]s within one another's directories, under which one file would stand in two [package]s; a model-level [workspace] name before anything consumes one; and leaving the maintenance unit's fixed files open, which prevents deterministic discovery.
 
-**LAYOUT-12. Hold a [build] at a [package]'s top, or none.**
-*Stated by* [build].
-*Because* no name or [path] says whether a [package] should hold one, and no [package] must then hold a file it has no use for.
-*Accepting* that a [package] gains its [build] when it first needs one.
+**LAYOUT-12. Hold an [assembly] at an authoritative source [package]'s top exactly where it declares derived targets, leaving its concrete form open.**
+*Stated by* [assembly], [assembly form] and [assembly targets].
+*Because* the source declaration names intended [assembly], distinct from the generation agents perform, the native toolchain's compilation and the generated target's realization map, so no file kind conflates those activities or authorities.
+*Because* a canonical native [package] with no derived units has no declaration to make and must not acquire an empty file.
+*Accepting* that a [package] gains its [assembly] with its first derived target, and that the concrete filename and grammar wait for the first derived-target implementation.
+*Rejected* `build`, which conflates declaration, agent work and native tooling; `generate` or `generation`, which names the activity rather than its input declaration; and a mandatory [assembly] for a canonical native [package] with no derived units.
 
 **LAYOUT-14. Name each [body] and [decisions] below the top after the directory holding it, and hold one of each at most.**
 *Stated by* [stem] and [one each].
@@ -82,22 +84,30 @@
 *Revisit* custom locations, when a [package] needs them.
 *Rejected* a free [stem], a second name for what the directory names; a fixed [stem] in every directory, as `body.md`, whose files are not told apart in tabs; several [body]s or [decisions] in one directory, a directory divided into files; and custom locations, a [source file] standing elsewhere than its [stem] names, a second way for every reader and tool to learn.
 
-**LAYOUT-15. Hold a [manifest] in every [package].**
+**LAYOUT-15. Hold a [manifest] in every canonical Quoll source [package].**
 *Stated by* [one manifest].
-*Because* the [manifest] is the public file by which a [package]'s top is known, so every [package] holds the one file that stands for it.
+*Because* the [manifest] is the public file by which a canonical [package]'s top is known, so every canonical Quoll source [package] holds the one file that stands for it; a native [package]'s overlay is not this canonical [manifest].
 
-**LAYOUT-16. Separate public [package] metadata, private membership, dependency resolutions and [workspace] membership into fixed files, using the `.quoll.toml` suffix for structured metadata, with [workspace decisions] optional where no workspace-level rationale exists.**
-*Stated by* [modules], [lock], [workspace manifest], [workspace decisions], [one modules], [one lock] and [workspace files].
-*Because* fixed names let people and tools discover each unit and each kind of statement without searching arbitrary directories, while separate public and private files keep internal structure out of the published surface.
+**LAYOUT-16. Separate canonical public [package] metadata, private membership, dependency resolutions and [workspace] membership into fixed files, using the `.quoll.toml` suffix for structured metadata, with [workspace decisions] optional where no workspace-level rationale exists, and keep those rules within the canonical Quoll source profile.**
+*Stated by* [modules], [lock], [workspace manifest], [workspace decisions], [one modules], [one lock], [workspace files] and [profile scope].
+*Because* fixed names let people and tools discover each canonical unit and each kind of statement without searching arbitrary directories, while separate public and private files keep internal structure out of the published surface.
 *Because* the compound suffix leaves the artifact kind first, marks Quoll ownership unmistakably beside another ecosystem's metadata, and remains an ordinary structured-data suffix for generic tools.
 *Because* [workspace decisions] keep the established entry file kind rather than giving a structured [manifest] two unrelated grammars, and the file appears with the first workspace-level rationale instead of being kept empty.
-*Accepting* longer filenames, a membership file that is metadata rather than a readable [package] overview, a committed [lock] for every root [package], and no empty [workspace decisions] file where none has anything to record.
-*Rejected* generic structured filenames that blend into a mixed directory; a `quoll.` prefix or hyphenated abbreviation, which trade readable kind names for grouping or brevity; one [manifest] mixing public and private material; a [workspace] [lock] competing with each [package]'s own resolution; one [workspace] file mixing membership with entries; and a mandatory empty [workspace decisions] file, which adds ceremony without a statement.
+*Because* a native [package] retains its own manifest, resolution, lock and release/source metadata authorities rather than inheriting the canonical [modules], Quoll [lock], pseudo-version or Markdown file rules.
+*Accepting* longer filenames, a membership file that is metadata rather than a readable [package] overview, a committed [lock] for every canonical root [package], no empty [workspace decisions] file where none has anything to record, and native [package]s without canonical metadata files.
+*Rejected* generic structured filenames that blend into a mixed directory; a `quoll.` prefix or hyphenated abbreviation, which trade readable kind names for grouping or brevity; one [manifest] mixing public and private material; a [workspace] [lock] competing with each [package]'s own resolution; one [workspace] file mixing membership with entries; a mandatory empty [workspace decisions] file, which adds ceremony without a statement; and imposing the canonical metadata, lock or Markdown rules on every native [package], which creates a second authority and pre-empts its profile.
 
-**LAYOUT-17. Hash exactly the selected [package]'s portable regular files with Go `dirhash.Hash1` and a SHA-256 multihash, rejecting content that cannot restore consistently across supported systems.**
+**LAYOUT-17. Hash exactly the selected canonical Quoll source [package]'s portable regular files with Go `dirhash.Hash1` and a SHA-256 multihash, rejecting content that cannot restore consistently across supported systems.**
 *Stated by* [content hash].
-*Because* the [package] is the publication unit, so hashing its own [path]s and raw blob bytes verifies the same delivered text from a mirror or extracted cache independently of repository history, neighboring content and archive metadata.
+*Because* the canonical [package] is the publication unit for this profile, so hashing its own [path]s and raw blob bytes verifies the same delivered text from a mirror or extracted cache independently of repository history, neighboring content and archive metadata.
 *Because* the established summary algorithm specifies each file digest, two spaces, the UTF-8 `/` [path] and a newline before the outer SHA-256 digest, while the community [multihash specification](https://github.com/multiformats/multihash) assigns `0x12` to SHA-256 and uses `0x20` for the 32-byte digest length, without replacing the summary serialization.
 *Because* raw bytes and portable [path]s avoid line-ending, filter and separator differences, while rejecting executable and special modes, symlinks, gitlinks, case collisions and Windows-reserved names prevents a tree that hashes on one system but cannot restore safely on another.
-*Accepting* rejection of non-portable [package]s at resolution and independent implementations checked against shared test vectors.
-*Rejected* preserving executable or symlink metadata, which creates platform differences without a demonstrated text-source consumer; NAR, Git tree objects, canonical TAR and a custom binary serialization, each retaining unwanted metadata, requiring new normalization or inventing a format without an interoperability advantage; and hashing the whole repository or an archive.
+*Accepting* rejection of non-portable canonical [package]s at resolution, independent implementations checked against shared test vectors, and native [package]s retaining their own release and source metadata rather than inheriting this digest rule.
+*Rejected* preserving executable or symlink metadata, which creates platform differences without a demonstrated text-source consumer; NAR, Git tree objects, canonical TAR and a custom binary serialization, each retaining unwanted metadata, requiring new normalization or inventing a format without an interoperability advantage; hashing the whole repository or an archive; and imposing this canonical content digest on every native [package].
+
+**LAYOUT-20. Keep one common [target map] at a generated target [package]'s top for its derived units, leaving its concrete filename and grammar open.**
+*Stated by* [target map] and [map when derived].
+*Because* intended [assembly] and actual realization have different homes and lifecycles: the authoritative source declares targets before they exist, while each generated target records its own derived units afterward.
+*Because* one canonical metadata kind shared by every profile keeps the realization record common without imposing the canonical Quoll source profile's file rules on native [package]s.
+*Accepting* that the concrete filename and grammar wait for the first derived-target implementation, and that a mixed [package]'s map covers its derived units alone.
+*Rejected* a complete map only in the authoritative source, which makes it mirror target structure and leaves the generated target without its own realization record; scattered per-file annotations, which lose the coherent target-level record; per-profile map grammars, which fragment one common record; and requiring either an [assembly] or a [target map] of a canonical native [package] with no derived units.
