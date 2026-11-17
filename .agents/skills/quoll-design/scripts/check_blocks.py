@@ -6,11 +6,9 @@ in a body, `impl [interface]:`. Opener lines stack at one indentation, at most o
 `impl` line and one other, the `impl` line first. Items are the least indented
 lines outside a group and the lines one step more indented inside one, a group
 ending at the first line indented as its openers are; every item's
-name is followed by two spaces. Also reports lines over 100 columns, an adjacent
-item or continuation line that can be filled with its following continuation within
-100 columns, an opener left at the start of a statement, a rule outside any group,
-and a rule whose group has no direction. Fillable lines are only reported; this
-checker does not rewrite source and no formatter is involved.
+name is followed by two spaces. Also reports an opener left at the start of a
+statement, a rule outside any group, and a rule whose group has no direction.
+Statement width and wrapping belong to `fmt.py`; this checker never rewrites source.
 """
 import re
 import sys
@@ -36,12 +34,8 @@ def check_block(path, heading, block):
     body = [(n, l) for n, l in block if l.strip()]
     least = min(len(l) - len(l.lstrip(" ")) for _, l in body)
     run, group, after_run = [], None, False
-    previous = None
-    continuing = False
     for n, l in body:
         indent, text = len(l) - len(l.lstrip(" ")), l.strip()
-        if len(l) > 100:
-            report(path, n, f"{len(l)} columns")
         if indent == least and is_opener(text):
             if not after_run:
                 run = []
@@ -54,8 +48,6 @@ def check_block(path, heading, block):
             if kinds[-1] == "impl" and "direction" in kinds[:-1]:
                 report(path, n, "an impl line under another opener")
             group, after_run = None, True
-            previous = None
-            continuing = False
             continue
         is_item = False
         if indent == least:
@@ -76,21 +68,6 @@ def check_block(path, heading, block):
                 report(path, n, f"no two spaces after the name: {rest[:40]!r}")
             elif rest[m.end():].split(" ", 1)[0] in DIRECTIONS:
                 report(path, n, "an opener left at the start of a statement")
-            previous = (n, l)
-            continuing = True
-        elif continuing and previous is not None:
-            if (
-                n == previous[0] + 1
-                and fence_marker(previous[1]) is None
-                and fence_marker(l) is None
-            ):
-                width = len(previous[1].rstrip()) + 1 + len(text)
-                if width <= 100:
-                    report(path, previous[0], f"fillable to {width} columns with the following line")
-            previous = (n, l)
-        else:
-            previous = None
-            continuing = False
 
 
 def fence_marker(line):
