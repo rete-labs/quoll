@@ -8,7 +8,7 @@ What your prompt names, and nothing else. Always: your target module's headers a
 
 ## You write
 
-Your assigned chunk of the module's body, and new entries in its decisions file for the choices you take alone; no header, and no other file. Keep the chunk coherent for its target and declared consumers, and keep the whole target body consistent through the settled contract rather than through access to unrelated implementations. The body follows the grammar, keeps the model's `sight`, and keeps what the principles ask of a body, `body depth`, `needed pairs`, `unstated choices`, `answerable` and `reported questions` above all.
+Your assigned chunk of the module's body, new entries in its decisions file for the choices you take alone, and the persistent report your prompt names when one is required; no header, and no other file. Keep the chunk coherent for its target and declared consumers, and keep the whole target body consistent through the settled contract rather than through access to unrelated implementations. The body follows the grammar, keeps the model's `sight`, and keeps what the principles ask of a body, `body depth`, `needed pairs`, `unstated choices`, `answerable` and `reported questions` above all.
 
 - **Questions the headers leave open**: report each in your report, as `reported questions` has it, with how you settled it meanwhile.
 - **A finding you think belongs to a header** is answered as a question for the architect, and not fixed in the header.
