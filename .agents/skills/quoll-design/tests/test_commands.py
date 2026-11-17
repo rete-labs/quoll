@@ -536,5 +536,283 @@ class NamedRootFacadeCase(CommandFixtures):
         )
 
 
+class FormatterCase(CommandFixtures):
+    def test_rewraps_underfilled_statements_and_is_idempotent(self) -> None:
+        original = (
+            "Lead and [outside.reference] stay here.\n"
+            "## Structure\n"
+            "```\n"
+            "  alpha    one two\n"
+            "           three [four.five]\n"
+            "  beta     already aligned\n"
+            "```\n"
+            "After the view.\n"
+        )
+        expected = (
+            "Lead and [outside.reference] stay here.\n"
+            "## Structure\n"
+            "```\n"
+            "  alpha    one two three [four.five]\n"
+            "  beta     already aligned\n"
+            "```\n"
+            "After the view.\n"
+        )
+        self.write(self.current, "mod.h.md", original)
+        first = self.run_command("fmt.py", self.current)
+        self.assertEqual(0, first.returncode, first.stdout + first.stderr)
+        self.assertIn("formatted: 1", first.stdout)
+        self.assertEqual(expected, (self.current / "mod.h.md").read_text(encoding="utf-8"))
+
+        second = self.run_command("fmt.py", self.current)
+        self.assertEqual(0, second.returncode, second.stdout + second.stderr)
+        self.assertIn("formatted: 0", second.stdout)
+        self.assertEqual(expected, (self.current / "mod.h.md").read_text(encoding="utf-8"))
+
+    def test_wraps_to_one_hundred_and_preserves_maximum_width_lines(self) -> None:
+        prefix = "  alpha    "
+        first = prefix + "x" * 40
+        continuation = " " * len(prefix) + "y" * (100 - len(first) - 1)
+        maximum = "  beta     " + "z" * (100 - len("  beta     "))
+        original = (
+            "## Structure\n```\n"
+            + first + "\n" + continuation + "\n"
+            + maximum + "\n"
+            + "```\n"
+        )
+        expected = (
+            "## Structure\n```\n"
+            + first + " " + continuation.strip() + "\n"
+            + maximum + "\n"
+            + "```\n"
+        )
+        self.write(self.current, "mod.h.md", original)
+        result = self.run_command("fmt.py", self.current)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(expected, (self.current / "mod.h.md").read_text(encoding="utf-8"))
+        self.assertTrue(all(len(line) <= 100 for line in expected.splitlines()))
+
+    def test_preserves_code_spans_repeated_spaces_and_unbreakable_words(self) -> None:
+        prefix = "  item    "
+        original = (
+            "## Structure\n```\n"
+            + prefix + "before `code span`  after\n"
+            + " " * len(prefix) + "[reference.name]\n"
+            + "  long    " + "x" * 110 + "\n"
+            + "```\n"
+        )
+        expected = (
+            "## Structure\n```\n"
+            + prefix + "before `code span`  after [reference.name]\n"
+            + "  long    " + "x" * 110 + "\n"
+            + "```\n"
+        )
+        self.write(self.current, "mod.h.md", original)
+        result = self.run_command("fmt.py", self.current)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(expected, (self.current / "mod.h.md").read_text(encoding="utf-8"))
+
+    def test_code_span_close_requires_an_exact_backtick_run(self) -> None:
+        prefix = "  item    "
+        span = "`before `` inside longer code`"
+        original = (
+            "## Structure\n```\n"
+            + prefix + "x" * 70 + "\n"
+            + " " * len(prefix) + span + " tail\n"
+            + "```\n"
+        )
+        expected = (
+            "## Structure\n```\n"
+            + prefix + "x" * 70 + "\n"
+            + " " * len(prefix) + span + " tail\n"
+            + "```\n"
+        )
+        self.write(self.current, "mod.h.md", original)
+        first = self.run_command("fmt.py", self.current)
+        self.assertEqual(0, first.returncode, first.stdout + first.stderr)
+        self.assertEqual(expected, (self.current / "mod.h.md").read_text(encoding="utf-8"))
+        second = self.run_command("fmt.py", self.current)
+        self.assertIn("formatted: 0", second.stdout)
+
+    def test_inline_link_destination_remains_atomic(self) -> None:
+        prefix = "  item    "
+        link = "[link](<foo) bar>)"
+        original = (
+            "## Structure\n```\n"
+            + prefix + "x" * 75 + "\n"
+            + " " * len(prefix) + link + " tail\n"
+            + "```\n"
+        )
+        expected = (
+            "## Structure\n```\n"
+            + prefix + "x" * 75 + "\n"
+            + " " * len(prefix) + link + " tail\n"
+            + "```\n"
+        )
+        self.write(self.current, "mod.h.md", original)
+        first = self.run_command("fmt.py", self.current)
+        self.assertEqual(0, first.returncode, first.stdout + first.stderr)
+        self.assertEqual(expected, (self.current / "mod.h.md").read_text(encoding="utf-8"))
+        second = self.run_command("fmt.py", self.current)
+        self.assertIn("formatted: 0", second.stdout)
+
+    def test_never_splits_a_multiword_reference(self) -> None:
+        prefix = "  item    "
+        original = (
+            "## Structure\n```\n"
+            + prefix + "x" * 70 + "\n"
+            + " " * len(prefix) + "[multiword reference] after\n"
+            + "```\n"
+        )
+        expected = (
+            "## Structure\n```\n"
+            + prefix + "x" * 70 + "\n"
+            + " " * len(prefix) + "[multiword reference] after\n"
+            + "```\n"
+        )
+        self.write(self.current, "mod.h.md", original)
+        result = self.run_command("fmt.py", self.current)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(expected, (self.current / "mod.h.md").read_text(encoding="utf-8"))
+
+    def test_formats_statements_that_start_on_continuation_lines(self) -> None:
+        original = (
+            "## Structure\n```\n"
+            "  alpha\n"
+            "      one two\n"
+            "      three\n"
+            "  beta\n"
+            "      " + "word " * 24 + "end\n"
+            "```\n"
+        )
+        expected = (
+            "## Structure\n```\n"
+            "  alpha\n"
+            "      one two three\n"
+            "  beta\n"
+            "      " + "word " * 18 + "word\n"
+            "      " + "word " * 5 + "end\n"
+            "```\n"
+        )
+        self.write(self.current, "mod.h.md", original)
+        first = self.run_command("fmt.py", self.current)
+        self.assertEqual(0, first.returncode, first.stdout + first.stderr)
+        actual = (self.current / "mod.h.md").read_text(encoding="utf-8")
+        self.assertEqual(expected, actual)
+        self.assertTrue(all(len(line) <= 100 for line in actual.splitlines()))
+        second = self.run_command("fmt.py", self.current)
+        self.assertIn("formatted: 0", second.stdout)
+        self.assertEqual(expected, (self.current / "mod.h.md").read_text(encoding="utf-8"))
+
+    def test_changes_no_content_outside_the_grammar_defined_views(self) -> None:
+        original = (
+            "+++\r\nincludes = []\r\n+++\r\n"
+            "Lead prose\r\n"
+            "## Notes\r\n```\r\n  literal    do not join\r\n               these lines\r\n```\r\n"
+            "## Structure\r\n~~~quoll\r\n  item    keep this\r\n~~~\r\n"
+            "## Structure\r\n```\r\n  duplicate    not a view\r\n```\r\n"
+            "Trailing prose without a final newline"
+        )
+        self.write(self.current, "mod.h.md", original)
+        non_sources = ("mod.decisions.md", "README.md", ".hidden/mod.h.md", ".hidden.h.md")
+        for relative in non_sources:
+            self.write(
+                self.current,
+                relative,
+                "## Structure\n```\n  alpha    one two\n           three\n```\n",
+            )
+        result = self.run_command("fmt.py", self.current)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("formatted: 0", result.stdout)
+        self.assertEqual(original, (self.current / "mod.h.md").read_bytes().decode("utf-8"))
+        for relative in non_sources:
+            self.assertEqual(
+                "## Structure\n```\n  alpha    one two\n           three\n```\n",
+                (self.current / relative).read_text(encoding="utf-8"),
+            )
+
+    def test_ignores_view_syntax_inside_an_outer_literal_fence(self) -> None:
+        original = (
+            "## Notes\n"
+            "~~~\n"
+            "## Structure\n"
+            "```\n"
+            "  alpha    one two\n"
+            "           three\n"
+            "```\n"
+            "~~~\n"
+            "## Structure\n"
+            "```\n"
+            "  beta     one two\n"
+            "           three\n"
+            "```\n"
+        )
+        expected = original.replace("  beta     one two\n           three", "  beta     one two three")
+        self.write(self.current, "mod.h.md", original)
+        first = self.run_command("fmt.py", self.current)
+        self.assertEqual(0, first.returncode, first.stdout + first.stderr)
+        self.assertEqual(expected, (self.current / "mod.h.md").read_text(encoding="utf-8"))
+        second = self.run_command("fmt.py", self.current)
+        self.assertIn("formatted: 0", second.stdout)
+
+    def test_atx_heading_variants_open_views(self) -> None:
+        for heading in ("## Structure", "   ## Structure ###"):
+            with self.subTest(heading=heading):
+                original = (
+                    heading + "\n"
+                    "```\n"
+                    "  alpha    one two\n"
+                    "           three\n"
+                    "```\n"
+                )
+                expected = original.replace("  alpha    one two\n           three", "  alpha    one two three")
+                self.write(self.current, "mod.h.md", original)
+                first = self.run_command("fmt.py", self.current)
+                self.assertEqual(0, first.returncode, first.stdout + first.stderr)
+                self.assertEqual(expected, (self.current / "mod.h.md").read_text(encoding="utf-8"))
+                second = self.run_command("fmt.py", self.current)
+                self.assertIn("formatted: 0", second.stdout)
+
+    def test_setext_heading_does_not_open_a_view(self) -> None:
+        original = (
+            "Structure\n"
+            "--------\n"
+            "```\n"
+            "  alpha    one two\n"
+            "           three\n"
+            "```\n"
+        )
+        self.write(self.current, "mod.h.md", original)
+        result = self.run_command("fmt.py", self.current)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("formatted: 0", result.stdout)
+        self.assertEqual(original, (self.current / "mod.h.md").read_text(encoding="utf-8"))
+
+    def test_real_rich_view_rewraps_and_is_idempotent(self) -> None:
+        repository = TEST_DIR.parents[3]
+        source = (repository / "language/model/rich.h.md").read_bytes()
+        self.current.mkdir()
+        (self.current / "rich.h.md").write_bytes(source)
+        first = self.run_command("fmt.py", self.current)
+        self.assertEqual(0, first.returncode, first.stdout + first.stderr)
+        formatted = (self.current / "rich.h.md").read_bytes()
+        self.assertNotEqual(source, formatted)
+
+        checked = self.run_command("check_blocks.py", self.current)
+        self.assertEqual(0, checked.returncode, checked.stdout + checked.stderr)
+        self.assertIn("problems: 0", checked.stdout)
+        second = self.run_command("fmt.py", self.current)
+        self.assertEqual(0, second.returncode, second.stdout + second.stderr)
+        self.assertIn("formatted: 0", second.stdout)
+        self.assertEqual(formatted, (self.current / "rich.h.md").read_bytes())
+
+    def test_usage_errors_use_stderr_and_exit_two(self) -> None:
+        for arguments in ((), (self.current / "missing",)):
+            with self.subTest(arguments=arguments):
+                result = self.run_command("fmt.py", *arguments)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertIn("fmt.py", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

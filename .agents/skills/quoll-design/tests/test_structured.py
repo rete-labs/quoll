@@ -276,7 +276,7 @@ class PackageCase(PackageFixtures, unittest.TestCase):
         self.assertEqual(["outside"], extract_refs(text))
         self.assertEqual([("outside", 5)], extract_refs(text, with_lines=True))
 
-    def test_block_command_checks_tilde_views_and_longer_fences(self) -> None:
+    def test_block_command_checks_structure_and_longer_fences(self) -> None:
         self.write(
             "broken.h.md",
             "## Structure\n~~~quoll\n  broken statement\n  wide    " + "x" * 100 + "\n~~~\n",
@@ -289,8 +289,8 @@ class PackageCase(PackageFixtures, unittest.TestCase):
             text=True,
         )
         self.assertIn("no two spaces after the name", result.stdout)
-        self.assertIn("columns", result.stdout)
-        self.assertIn("problems: 2", result.stdout)
+        self.assertNotIn("columns", result.stdout)
+        self.assertIn("problems: 1", result.stdout)
 
         (self.root / "broken.h.md").write_text(
             "## Structure\n~~~~quoll\n  first    valid\n~~~  not a closing fence\n  second   also valid\n~~~~\n",
@@ -304,7 +304,7 @@ class PackageCase(PackageFixtures, unittest.TestCase):
         )
         self.assertIn("problems: 0", result.stdout)
 
-    def test_block_command_reports_only_fillable_short_lines(self) -> None:
+    def test_block_command_ignores_width_and_fillable_lines(self) -> None:
         first = "  workspace    " + "x" * 40
         continuation = "               " + "y" * (100 - len(first) - 1)
         wide_first = "  release    " + "x" * 80
@@ -324,8 +324,9 @@ class PackageCase(PackageFixtures, unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertIn("fillable to 100 columns with the following line", result.stdout)
-        self.assertIn("problems: 1", result.stdout)
+        self.assertNotIn("fillable", result.stdout)
+        self.assertNotIn("columns", result.stdout)
+        self.assertIn("problems: 0", result.stdout)
         self.assertEqual(text, (self.root / "fillable.h.md").read_text(encoding="utf-8"))
 
     def test_malformed_front_matter_is_safe(self) -> None:
