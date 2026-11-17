@@ -8,7 +8,7 @@ What your prompt names, and nothing else. Always: the current ratified decisions
 
 ## You write
 
-The headers, private headers, the manifest and the decisions files your prompt names; no body, and no other file. Every file follows the grammar, and the package keeps the principles.
+The headers, private headers, the manifest and the decisions files your prompt names, and its persistent report when one is required; no body, and no other file. Every file follows the grammar, and the package keeps the principles.
 
 - **Faithful.** State everything the inputs currently ratify, as ratified, and nothing they do not, beyond what consistency forces. Where a verdict settles a principle but not its terms or its form, write one `open:` item in the wording your prompt gives, and design nothing of it.
 - **A module's line.** What a header states and what its module hides follow the module's line in the manifest; where they part, raise it.

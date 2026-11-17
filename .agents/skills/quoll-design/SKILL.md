@@ -57,6 +57,7 @@ You write each role's prompt yourself, and run it by whatever your agent has for
 - **the target change or chunk** and its declared consumers, with the boundaries of its review or writing task;
 - **what it reads**: every file by its path, those its reference file says it always reads among them, and that it reads no other, naming in its report any other it needs;
 - **what it writes**, and that it changes no other file;
+- **its report delivery**: one exact persistent report path, or a complete text-only hand-back, as [`references/writing.md`](references/writing.md) has it; a text-only report is not silently persisted;
 - **the checks to run**, with exact current, baseline, dependency, and output paths;
 - **what it reports** at its end, as its reference file says, including decision-lifetime and closed-change results and documented non-findings.
 

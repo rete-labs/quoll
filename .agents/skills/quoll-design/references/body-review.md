@@ -18,7 +18,7 @@ Judge the baseline-filtered `check_package.py` output as high-confidence, diff-s
 
 ## You write
 
-Your findings, appended to the file your prompt names, the working directory's `findings.md` by default: one entry per finding, numbered `<MNEMONIC>-FN-<n>` by the mnemonic of the module it is about, continuing the file's numbering, each with its place, what is wrong, which check it fails, a suggested fix, and *blocking* or *minor*. A finding against a header, not the body, says so. Under a separate `Non-findings` heading, record each rejected diagnostic with its reason, and record explicit no-change results for decision lifetime and closed change where applicable. Change no other file.
+Your findings, appended to the persistent report file your prompt names, the working directory's `reviewer-report.md` by default: one entry per finding, numbered `<MNEMONIC>-FN-<n>` by the mnemonic of the module it is about, continuing the file's numbering, each with its place, what is wrong, which check it fails, a suggested fix, and *blocking* or *minor*. A finding against a header, not the body, says so. Under a separate `Non-findings` heading, record each rejected diagnostic with its reason, and record explicit no-change results for decision lifetime and closed change where applicable. Change no other file.
 
 In a later round, you confirm: for each finding, whether the writer's fix or answer settles it, and any new finding the fixes or newer ratified verdicts made. Keep each round's findings tied to its frozen inputs.
 
