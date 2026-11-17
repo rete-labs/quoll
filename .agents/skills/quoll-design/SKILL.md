@@ -12,7 +12,7 @@ Read [`AGENTS.md`](../../../AGENTS.md) first: its conventions bind everything he
 ## Taking a ticket
 
 1. Read the issue whole, with `gh issue view <n> --comments`, and every design it links. Restate its scope to yourself: what it asks, and what its requirements are. Where the scope is unclear, ask the person; never infer it from what is missing.
-2. Open its working directory, `.quoll-wip/<issue>-<topic>/`, and its branch, `<type>/<issue>/<description>`, from the start.
+2. Inspect the worktree before creating or switching a branch, performing a reset, or changing history or worktree state. If it is not clean, ask the person what to do; never silently discard or overwrite existing work. Open the ticket's working directory, `.quoll-wip/<issue>-<topic>/`, and its branch, `<type>/<issue>/<description>`, from the start.
 3. Read what of the definition the ticket touches, and the package it works on, as it stands. Establish what exists and what is only designed: a decision resting on a module or a file that does not exist yet is a mistake this prevents.
 4. Work it by its label:
    - `write`: decide and write one package change. Take what the ticket leaves open through the deciding pass below, then write its final package by the roles below, reopening a verdict with the person whenever the writing or review tests it. Its working `decisions.md` stays local; its final source and component decisions are committed together.
@@ -87,6 +87,10 @@ Use review-mode output for a named investigation, not as a broad lexical-advisor
 
 Run all four test suites with `python3 -I -m unittest discover -s .agents/skills/quoll-design/tests -p 'test_*.py'`.
 
+## Permissions
+
+For Claude Code, use [`references/claude/permissions.md`](references/claude/permissions.md) for standing global and project command rules and exact task-local approvals. The committed project allowlist serves the main agent and subagents. Kimi as an LLM provider under Claude Code is covered by [`references/claude/kimi.md`](references/claude/kimi.md). For other agents, users configure their own harness's tool permissions; role prompts and this guidance grant none. Release batches follow [`references/release.md`](references/release.md).
+
 ## Closing a ticket
 
 Nothing is pushed before the ticket's final review settles: the repository is public, and a push publishes.
@@ -94,6 +98,6 @@ Nothing is pushed before the ticket's final review settles: the repository is pu
 1. Commit the package's final source and its component decisions together on the ticket's branch as `AGENTS.md` says, the body ending with `Closes #<issue>`. The working `decisions.md` and any throwaway Quoll stay uncommitted. Each round of fixes after a review is a commit of its own, so that the reviewer sees what changed since its last round as well as the whole.
 2. Write the pull request's body to the working directory's `pr.md`: what changed; which decisions were recorded, by their entries' IDs; the roles run, their rounds, and the agent and model of each; and **what this guidance left unanswered**, each question you had to ask the person or guess. It quotes nothing of the working directory, which is private.
 3. Ask the person for the final review: a fresh reviewer, run by the person, reviews the branch as [`references/ticket-review.md`](references/ticket-review.md) has it, and writes its findings to the working directory's `review.md`. Answer each beneath it, fixed or why not, the fixes in a new commit. A finding that reopens a verdict goes back to the person as an axis; record the amended verdict in the working record and carry it into the final source and its component decisions together.
-4. Once the person says the review is settled, squash the branch's commits into one, its message the first's, amended where the fixes changed what it says, as the last step before the push, and check that `git diff <last reviewed commit>` is empty; then the person pushes the branch and opens the pull request with `pr.md`, or asks you to. The person merges.
+4. Once the person says the review is settled, squash the branch's commits into one, its message the first's, amended where the fixes changed what it says, as the last step before the push. Use `git reset --soft <commit-before-ticket>` for the squash and `git push origin HEAD` or `git push -u origin HEAD` for publication; these are the standing fast-path forms. Check that `git diff <last reviewed commit>` is empty; then the person pushes the branch and opens the pull request with `pr.md`, or asks you to. The person merges.
 
 If a session ends before the ticket closes, write `handoff.md` in the working directory: where the ticket stands, what is next, and what to read first.
