@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(python3 -I .agents/skills/quoll-design/scripts/fmt.py language *)",
+      "Bash(python3 -I .agents/skills/quoll-design/scripts/fmt.py std *)",
+      "Bash(python3 -I .agents/skills/quoll-design/scripts/check_blocks.py language *)",
+      "Bash(python3 -I .agents/skills/quoll-design/scripts/check_blocks.py std *)",
+      "Bash(python3 -I .agents/skills/quoll-design/scripts/check_package.py language *)",
+      "Bash(python3 -I .agents/skills/quoll-design/scripts/check_package.py std *)",
+      "Bash(python3 -I .agents/skills/quoll-design/scripts/check_bare.py language *)",
+      "Bash(python3 -I .agents/skills/quoll-design/scripts/check_bare.py std *)",
+      "Bash(python3 -I .agents/skills/quoll-design/scripts/ref_sites.py *)",
+      "Bash(python3 -I .agents/skills/quoll-design/scripts/extract.py *)",
+      "Bash(python3 -I -m unittest discover -s .agents/skills/quoll-design/tests *)"
+    ]
+  }
+}
