@@ -688,63 +688,94 @@ def _parse_view(lines: list[str], start: int, end: int) -> list[Item]:
 
 
 def _fence_marker(line: str) -> str | None:
-    match = re.match(r"^\s*(`{3,}|~{3,})", line)
+    match = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
     return match.group(1) if match else None
 
 
 def _is_fence_close(line: str, marker: str) -> bool:
+    raw = line.rstrip("\r\n")
     return bool(
-        re.fullmatch(rf"\s*{re.escape(marker[0])}{{{len(marker)},}}\s*", line)
+        re.fullmatch(rf" {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}[ \t]*", raw)
     )
 
 
+def _atx_heading(line: str) -> tuple[int, str] | None:
+    """Return a canonical plain ATX heading's level and text."""
+
+    raw = line.rstrip("\r\n")
+    match = re.fullmatch(r"(#{1,6}) (.+)", raw)
+    if match is None:
+        return None
+    text = match.group(2)
+    if text != text.strip() or re.search(r"(?:^|[ \t])#+$", text):
+        return None
+    return len(match.group(1)), text
+
+
+def _view_blocks(lines: list[str]) -> list[tuple[str, int, int]]:
+    """Return each first named section's first fence content bounds."""
+
+    blocks: list[tuple[str, int, int]] = []
+    fence: str | None = None
+    view_start: int | None = None
+    view_section: str | None = None
+    section: str | None = None
+    section_had_fence = False
+    seen_sections: set[str] = set()
+
+    for index, line in enumerate(lines):
+        raw = line.rstrip("\r\n")
+        if fence is not None:
+            if _is_fence_close(raw, fence):
+                if view_start is not None and view_section is not None:
+                    blocks.append((view_section, view_start, index))
+                    view_start = None
+                    view_section = None
+                fence = None
+            continue
+
+        heading = _atx_heading(raw)
+        if heading is not None:
+            level, text = heading
+            if level <= 2:
+                section = None
+                section_had_fence = False
+                if level == 2 and text in {"Structure", "Flow", "Rules"} and text not in seen_sections:
+                    section = text
+                    seen_sections.add(text)
+            continue
+
+        marker = _fence_marker(raw)
+        if marker is not None:
+            fence = marker
+            if section is not None and not section_had_fence:
+                view_start = index + 1
+                view_section = section
+                section_had_fence = True
+
+    if view_start is not None and view_section is not None:
+        blocks.append((view_section, view_start, len(lines)))
+    return blocks
+
+
 def _parse_views(source: SourceFile, lines: list[str]) -> None:
+    blocks = _view_blocks(lines)
     for piece in ("Structure", "Flow", "Rules"):
-        heading = next(
-            (index for index, line in enumerate(lines) if re.match(rf"^##\s+{piece}\s*$", line)),
-            None,
-        )
-        if heading is None:
-            continue
-        section_end = next(
-            (
-                index
-                for index in range(heading + 1, len(lines))
-                if re.match(r"^#{1,2}\s+", lines[index])
-            ),
-            len(lines),
-        )
-        opening = next(
-            (
-                (index, marker)
-                for index in range(heading + 1, section_end)
-                if (marker := _fence_marker(lines[index])) is not None
-            ),
-            None,
-        )
-        if opening is None:
-            continue
-        opening_index, marker = opening
-        closing = next(
-            (
-                index
-                for index in range(opening_index + 1, section_end)
-                if _is_fence_close(lines[index], marker)
-            ),
-            section_end,
-        )
-        source.items.extend(
-            Item(
-                name=item.name,
-                statements=item.statements,
-                direction=item.direction,
-                impl=item.impl,
-                line=item.line,
-                end_line=item.end_line,
-                view=piece,
+        for view_piece, start, end in blocks:
+            if view_piece != piece:
+                continue
+            source.items.extend(
+                Item(
+                    name=item.name,
+                    statements=item.statements,
+                    direction=item.direction,
+                    impl=item.impl,
+                    line=item.line,
+                    end_line=item.end_line,
+                    view=piece,
+                )
+                for item in _parse_view(lines, start, end)
             )
-            for item in _parse_view(lines, opening_index + 1, closing)
-        )
 
 
 _ONE_LINE_POINTER_STUB = re.compile(
@@ -1250,14 +1281,17 @@ def _mask_literals(text: str) -> str:
     fence_is_view = False
     section: str | None = None
     section_had_fence = False
+    seen_sections: set[str] = set()
     for index, line in enumerate(lines):
-        heading = re.match(r"^##\s+(Structure|Flow|Rules)\s*$", line)
-        if heading and fence is None:
-            section = heading.group(1)
-            section_had_fence = False
-        elif re.match(r"^#{1,2}\s+", line) and fence is None:
-            section = None
-            section_had_fence = False
+        heading = _atx_heading(line)
+        if heading is not None and fence is None:
+            level, text = heading
+            if level <= 2:
+                section = None
+                section_had_fence = False
+                if level == 2 and text in {"Structure", "Flow", "Rules"} and text not in seen_sections:
+                    section = text
+                    seen_sections.add(text)
         marker = _fence_marker(line)
         if marker is not None:
             if fence is None:

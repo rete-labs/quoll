@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from quollcheck import _fence_marker, _is_fence_close, _opener  # noqa: E402
+from quollcheck import _opener, _view_blocks  # noqa: E402
 
 WIDTH = 100
 
@@ -35,55 +35,9 @@ def _ending(line: str) -> str:
     return line[len(_content(line)) :]
 
 
-def _atx_heading(line: str) -> tuple[int, str] | None:
-    match = re.match(r"^ {0,3}(#{1,6})(?:[ \t]+(.*)|[ \t]*)$", line)
-    if match is None:
-        return None
-    content = (match.group(2) or "").strip(" \t")
-    content = re.sub(r"[ \t]+#+[ \t]*$", "", content).strip(" \t")
-    return len(match.group(1)), content
-
-
 def _view_spans(lines: list[str]) -> list[tuple[int, int]]:
     """Return content bounds for views, with ATX heading and fence boundaries."""
-    spans = []
-    fence: str | None = None
-    view_start: int | None = None
-    section: str | None = None
-    section_had_fence = False
-    seen_sections: set[str] = set()
-
-    for index, line in enumerate(lines):
-        raw = _content(line)
-        if fence is not None:
-            if _is_fence_close(raw, fence):
-                if view_start is not None:
-                    spans.append((view_start, index))
-                    view_start = None
-                fence = None
-            continue
-
-        heading = _atx_heading(raw)
-        if heading is not None:
-            level, text = heading
-            if level <= 2:
-                section = None
-                section_had_fence = False
-                if level == 2 and text in {"Structure", "Flow", "Rules"} and text not in seen_sections:
-                    section = text
-                    seen_sections.add(text)
-            continue
-
-        marker = _fence_marker(raw)
-        if marker is not None:
-            fence = marker
-            if section is not None and not section_had_fence:
-                view_start = index + 1
-                section_had_fence = True
-
-    if view_start is not None:
-        spans.append((view_start, len(lines)))
-    return spans
+    return [(start, end) for _section, start, end in _view_blocks(lines)]
 
 
 def _items(lines: list[str], start: int, end: int) -> list[_Item]:
