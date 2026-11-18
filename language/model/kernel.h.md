@@ -62,14 +62,13 @@ The language definition's design ontology, with this interface its [structural k
                           [decision] or plain-definition owner by omission; the named [item]s'
                           [unit] authority provisionally distinguishes contract choices from
                           delegated implementation choices without forming a permanent taxonomy;
-                          Because, its reasons;
-                          Accepting, its costs; Revisit, where it is provisional, what would call
-                          for it to be taken again; Rejected, each option it rejected, with its
-                          reason, a scope its holder leaves out among them; Superseded by, its
-                          successor, a [decision] its holder holds; Formerly, the ID it bore in
-                          another [module], in its own tree or another, before it moved, naming
-                          nothing; and Taken by, the role of the writer who took it alone, where
-                          people left it open
+                          Because, its reasons; Accepting, its costs; Revisit, where it is
+                          provisional, what would call for it to be taken again; Rejected, each
+                          option it rejected, with its reason, a scope its holder leaves out among
+                          them; Superseded by, its successor, a [decision] its holder holds;
+                          Formerly, the ID it bore in another [module], in its own tree or another,
+                          before it moved, naming nothing; and Taken by, the role of the writer who
+                          took it alone, where people left it open
 
   module                  the unit of hiding, keeping one secret, a choice likely to change, behind
                           the [interface]s it provides or implements: its name; what it is for, and

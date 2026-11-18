@@ -958,15 +958,21 @@ class FormatterCase(CommandFixtures):
                 self.assertIn("formatted: 0", result.stdout)
                 self.assertEqual(original, (self.current / "mod.h.md").read_text(encoding="utf-8"))
 
-    def test_real_rich_view_rewraps_and_is_idempotent(self) -> None:
-        repository = TEST_DIR.parents[3]
-        source = (repository / "language/model/rich.h.md").read_bytes()
-        self.current.mkdir()
-        (self.current / "rich.h.md").write_bytes(source)
+    def test_rewrapped_view_passes_structural_check_and_is_idempotent(self) -> None:
+        original = (
+            "A synthetic view with an [outside.reference].\n"
+            "## Structure\n"
+            "```\n"
+            "  alpha    one two\n"
+            "           three [four.five]\n"
+            "  beta     already aligned\n"
+            "```\n"
+        )
+        self.write(self.current, "mod.h.md", original)
         first = self.run_command("fmt.py", self.current)
         self.assertEqual(0, first.returncode, first.stdout + first.stderr)
-        formatted = (self.current / "rich.h.md").read_bytes()
-        self.assertNotEqual(source, formatted)
+        formatted = (self.current / "mod.h.md").read_text(encoding="utf-8")
+        self.assertNotEqual(original, formatted)
 
         checked = self.run_command("check_blocks.py", self.current)
         self.assertEqual(0, checked.returncode, checked.stdout + checked.stderr)
@@ -974,7 +980,7 @@ class FormatterCase(CommandFixtures):
         second = self.run_command("fmt.py", self.current)
         self.assertEqual(0, second.returncode, second.stdout + second.stderr)
         self.assertIn("formatted: 0", second.stdout)
-        self.assertEqual(formatted, (self.current / "rich.h.md").read_bytes())
+        self.assertEqual(formatted, (self.current / "mod.h.md").read_text(encoding="utf-8"))
 
     def test_usage_errors_use_stderr_and_exit_two(self) -> None:
         for arguments in ((), (self.current / "missing",)):
