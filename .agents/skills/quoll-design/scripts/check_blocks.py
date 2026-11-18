@@ -14,6 +14,10 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from quollcheck import _view_blocks  # noqa: E402
+
 DIRECTIONS = {"ensures:", "requires:", "open:"}
 IMPL = re.compile(r"^impl \[[^\]]+\]:$")
 root = Path(sys.argv[1])
@@ -70,30 +74,10 @@ def check_block(path, heading, block):
                 report(path, n, "an opener left at the start of a statement")
 
 
-def fence_marker(line):
-    match = re.match(r"^\s*(`{3,}|~{3,})", line)
-    return match.group(1) if match else None
-
-
-def is_fence_close(line, marker):
-    return bool(re.fullmatch(rf"\s*{re.escape(marker[0])}{{{len(marker)},}}\s*", line))
-
-
 for path in sorted(root.rglob("*.md")):
     lines = path.read_text(encoding="utf-8").split("\n")
-    heading, marker, block = None, None, []
-    for no, line in enumerate(lines, 1):
-        if line.startswith("## ") and marker is None:
-            heading = line[3:].strip()
-        found = fence_marker(line)
-        if marker is None and found is not None:
-            marker, block = found, []
-            continue
-        if marker is not None:
-            if is_fence_close(line, marker):
-                if block:
-                    check_block(path, heading, block)
-                marker, block = None, []
-            else:
-                block.append((no, line))
+    for heading, start, end in _view_blocks(lines):
+        block = [(index + 1, lines[index]) for index in range(start, end)]
+        if block:
+            check_block(path, heading, block)
 print("problems:", bad)

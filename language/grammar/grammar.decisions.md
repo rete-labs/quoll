@@ -53,18 +53,19 @@
 
 **GRAM-6.** *Superseded by* GRAM-31
 
-**GRAM-31. Write every canonical Markdown design file as [view]s over [item] lines within [markdown], keeping wholly structured canonical metadata in [toml] instead.**
+**GRAM-31. Write every canonical Markdown design file as [view]s over [item] lines within [markdown], with plain ATX headings alone and wholly structured canonical metadata in [toml] instead.**
 *Stated by* [markdown], [construct], [section], [view], [view block], [written] and [no empty view].
 *Because* a Markdown design file then reads as written wherever that flavour is shown, its tables, task boxes and links among it, and the language's [construct]s stand apart from [markdown]'s own forms, each defined beside it.
+*Because* one plain ATX heading form gives prose and [section] boundaries the same syntax, and treating every other form as ordinary text keeps canonical reading within that one grammar.
 *Because* the language extends Markdown already, by its [reference]s, and grows by an [item].
 *Because* [item]s then read as code does, one level above a programming language, in the fenced block engineers like to read: names in a [column] the eye runs down, a statement starting where the eye lands, with no markup on the line, and a long statement one visual unit.
 *Because* headings give the [view block]s what bulk text lacks, a way to navigate, while the [layout.source file] renders in an editor, on a code host and in review tools alike.
 *Because* a [view block] is still written by rule, as formal as any list.
 *Because* a [layout.header] and a [layout.body] then share one outline, so a reader of one knows where to look in the other.
 *Because* a [view] with nothing to hold states nothing, so none is written to keep an outline full.
-*Accepting* [column]s kept aligned on every edit, which agents do readily and a formatter can restore; links not clickable within a [view block]; a [view block] shown in monospace on a code host; and pure structured files outside this Markdown form.
+*Accepting* [column]s kept aligned on every edit, which agents do readily and a formatter can restore; links not clickable within a [view block]; a [view block] shown in monospace on a code host; canonical [markdown] narrower than unrestricted GFM, with a Markdown host allowed to render Setext or another noncanonical ATX form as a heading while Quoll treats the same lines as ordinary text; and pure structured files outside this Markdown form.
 *Revisit* the concrete syntax in a dedicated design pass informed by native and document profiles, with canonical Markdown retained meanwhile and no migration scheduled.
-*Rejected* CommonMark alone, which reads a table as a paragraph; the language's [construct]s found line by line over the whole text, which reads a heading or a bracket within a fenced block otherwise than every renderer does; a [markdown] list, a bold name and its statement on each line, which reads as a document's prose where engineers read code; columns of text alone, with no headings to navigate; a programming language's syntax, statements quoted within braces, formal punctuation that reads as code with strings in it; prose within structured data for design [view]s, the least readable of all; a [markdown] shell for wholly structured metadata, which misstates the file's format; an Illustrations [section] beside the [view]s, which nothing used; and an empty [view] written over an empty fenced block.
+*Rejected* CommonMark alone, which reads a table as a paragraph; the complete GFM ATX form, which retains compatibility spellings with no canonical use; the language's [construct]s found line by line over the whole text, which reads a heading or a bracket within a fenced block otherwise than every renderer does; a [markdown] list, a bold name and its statement on each line, which reads as a document's prose where engineers read code; columns of text alone, with no headings to navigate; a programming language's syntax, statements quoted within braces, formal punctuation that reads as code with strings in it; prose within structured data for design [view]s, the least readable of all; a [markdown] shell for wholly structured metadata, which misstates the file's format; an Illustrations [section] beside the [view]s, which nothing used; and an empty [view] written over an empty fenced block.
 *Formerly* the renderer's SYN-7.
 
 **GRAM-7. Write no [reference] in [literal] text, and let one run over the lines of an [item] or a paragraph.**

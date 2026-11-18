@@ -271,6 +271,87 @@ class PackageCase(PackageFixtures, unittest.TestCase):
             extract_refs(source, with_lines=True),
         )
 
+    def test_heading_subset_controls_parsing_and_reference_masking(self) -> None:
+        invalid = (
+            "Structure\n--------",
+            "Structure\n========",
+            "  ## Structure",
+            "##  Structure",
+            "##\tStructure",
+            "## Structure ##",
+            "## Structure  ",
+            "##",
+        )
+        for heading in ("## Structure", *invalid):
+            with self.subTest(opening=heading):
+                self.current()
+                self.write(
+                    "mod/mod.h.md",
+                    heading + "\n```\n  item    [inside]\n```\n",
+                )
+                source = load_package(self.root).module_map["mod"].header
+                expected = ["item"] if heading == "## Structure" else []
+                self.assertEqual(expected, [item.name for item in source.items])
+                self.assertEqual(["inside"] if expected else [], source.references)
+
+        nonclosing = (
+            "Outside\n--------",
+            "Outside\n========",
+            "  ## Outside",
+            "##  Outside",
+            "##\tOutside",
+            "## Outside ##",
+            "## Outside  ",
+            "##",
+            "### Outside",
+        )
+        for heading in ("# Outside", "## Outside", *nonclosing):
+            with self.subTest(closing=heading):
+                self.current()
+                self.write(
+                    "mod/mod.h.md",
+                    "## Structure\n" + heading + "\n```\n  item    [inside]\n```\n",
+                )
+                source = load_package(self.root).module_map["mod"].header
+                closed = heading in {"# Outside", "## Outside"}
+                self.assertEqual([] if closed else ["item"], [item.name for item in source.items])
+                self.assertEqual([] if closed else ["inside"], source.references)
+
+    def test_literal_heading_examples_and_duplicate_sections_stay_outside_views(self) -> None:
+        self.current()
+        self.write(
+            "mod/mod.h.md",
+            "~~~text\nStructure\n--------\nOther\n=====\n## Structure\n[literal]\n~~~\n"
+            "## Structure\n```\n  first    [view]\n```\n"
+            "## Structure\n```\n  duplicate    [not a view]\n```\n"
+            "After [after].\n",
+        )
+        source = load_package(self.root).module_map["mod"].header
+        self.assertEqual(["first"], [item.name for item in source.items])
+        self.assertEqual(["view", "after"], source.references)
+
+    def test_fence_recognition_uses_the_gfm_indentation_limit(self) -> None:
+        self.assertEqual(["outside"], extract_refs("   ```\n[inside]\n   ```\n[outside]\n"))
+        self.assertEqual(["outside"], extract_refs("    ```\n[outside]\n"))
+
+        self.current()
+        self.write(
+            "mod/mod.h.md",
+            "## Structure\n    ```\n  item    [outside]\n",
+        )
+        source = load_package(self.root).module_map["mod"].header
+        self.assertEqual([], source.items)
+        self.assertEqual(["outside"], source.references)
+
+        script = TEST_DIR.parent / "scripts" / "check_blocks.py"
+        result = subprocess.run(
+            [sys.executable, "-I", str(script), str(self.root)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("problems: 0", result.stdout)
+
     def test_longer_literal_fence_ignores_shorter_internal_fence(self) -> None:
         text = "````text\n```\n[inside]\n````\n[outside]\n"
         self.assertEqual(["outside"], extract_refs(text))
@@ -303,6 +384,59 @@ class PackageCase(PackageFixtures, unittest.TestCase):
             text=True,
         )
         self.assertIn("problems: 0", result.stdout)
+
+    def test_block_command_uses_only_plain_atx_view_boundaries(self) -> None:
+        script = TEST_DIR.parent / "scripts" / "check_blocks.py"
+        invalid = (
+            "Structure\n--------",
+            "Structure\n========",
+            "  ## Structure",
+            "##  Structure",
+            "##\tStructure",
+            "## Structure ##",
+            "## Structure  ",
+            "##",
+        )
+        for heading in ("## Structure", *invalid):
+            with self.subTest(opening=heading):
+                self.write(
+                    "broken.h.md",
+                    heading + "\n```\n  broken statement\n```\n",
+                )
+                result = subprocess.run(
+                    [sys.executable, "-I", str(script), str(self.root)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                expected = "problems: 1" if heading == "## Structure" else "problems: 0"
+                self.assertIn(expected, result.stdout)
+
+        nonclosing = (
+            "Outside\n--------",
+            "Outside\n========",
+            "  ## Outside",
+            "##  Outside",
+            "##\tOutside",
+            "## Outside ##",
+            "## Outside  ",
+            "##",
+            "### Outside",
+        )
+        for heading in ("# Outside", "## Outside", *nonclosing):
+            with self.subTest(closing=heading):
+                self.write(
+                    "broken.h.md",
+                    "## Structure\n" + heading + "\n```\n  broken statement\n```\n",
+                )
+                result = subprocess.run(
+                    [sys.executable, "-I", str(script), str(self.root)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                closed = heading in {"# Outside", "## Outside"}
+                self.assertIn("problems: 0" if closed else "problems: 1", result.stdout)
 
     def test_block_command_ignores_width_and_fillable_lines(self) -> None:
         first = "  workspace    " + "x" * 40

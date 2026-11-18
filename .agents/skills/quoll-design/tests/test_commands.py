@@ -189,6 +189,122 @@ class MainCommandCase(CommandFixtures):
         self.assertIn("prose.bare-word", review.stdout)
         self.assertNotIn("semantic.resolved", review.stdout)
 
+    def test_noncanonical_heading_forms_are_ordinary_text(self) -> None:
+        variants = (
+            "  ## Structure",
+            "##  Structure",
+            "##\tStructure",
+            "## Structure ##",
+            "## Structure  ",
+            "##",
+        )
+        ordinary = (
+            "Setext one\n==========\nSetext two\n----------\n"
+            + "\n".join(variants)
+            + "\n"
+        )
+        self.make_v04(self.current, {"mod/mod.h.md": ordinary})
+        result = self.run_command("check_package.py", self.current)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("errors: 0; reviews: 0", result.stdout)
+        self.assertNotIn("markdown.setext-heading", result.stdout)
+        self.assertNotIn("markdown.atx-heading", result.stdout)
+
+        valid = (
+            "# Title\n## Structure\n```\n  item    valid\n```\n"
+            "### Three\n#### Four\n##### Five\n###### Six\n"
+            "~~~text\nSetext one\n==========\nSetext two\n----------\n"
+            + "\n".join(variants)
+            + "\n~~~\n"
+        )
+        self.write(self.current, "mod/mod.h.md", valid)
+        result = self.run_command("check_package.py", self.current)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+        self.write(self.current, "mod/mod.h.md", "Setext [missing]\n----------\n")
+        unrelated = self.run_command("check_package.py", self.current)
+        self.assertEqual(1, unrelated.returncode, unrelated.stdout + unrelated.stderr)
+        self.assertIn("semantic.resolved", unrelated.stdout)
+        self.assertNotIn("markdown.setext-heading", unrelated.stdout)
+        self.assertNotIn("markdown.atx-heading", unrelated.stdout)
+
+    def test_prior_gfm_recognition_cases_are_ordinary_text(self) -> None:
+        cases = (
+            "####### plain text\n",
+            "######## also plain text\n",
+            "####### Setext text\n----------\n",
+            "***\n---\n",
+            "* * *\n---\n",
+            "___\n===\n",
+            "    code\n---\n",
+            "- item\n---\n",
+            "> quote\n---\n",
+            "Paragraph\ncontinued\n---\n",
+            "    ```\nSetext\n------\n",
+            "   ```text\nSetext\n------\n   ```\n",
+            "Paragraph\n2. still paragraph\n---\n",
+            "Paragraph\n2) still paragraph\n---\n",
+            "Paragraph\n1. interrupts paragraph\n---\n",
+            "Paragraph\n1) interrupts paragraph\n---\n",
+            "2. outside paragraph\n---\n",
+            "2) outside paragraph\n---\n",
+            "Paragraph\n1.\n---\n",
+            "Paragraph\n1)\n---\n",
+            "1234567890. paragraph text\n---\n",
+            "Paragraph\n0000000001. still paragraph\n---\n",
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                self.make_v04(self.current, {"mod/mod.h.md": source})
+                result = self.run_command("check_package.py", self.current)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertIn("errors: 0; reviews: 0", result.stdout)
+                self.assertNotIn("markdown.setext-heading", result.stdout)
+                self.assertNotIn("markdown.atx-heading", result.stdout)
+
+        self.make_v04(
+            self.current,
+            {
+                "mod/mod.h.md": (
+                    "A source locator.\n## Structure\n    ```\n"
+                    "  source locator    not a view\n"
+                )
+            },
+        )
+        bare = self.run_command("check_bare.py", self.current)
+        self.assertEqual(0, bare.returncode, bare.stdout + bare.stderr)
+        self.assertNotIn("prose.bare-compound", bare.stdout)
+
+    def test_bare_command_uses_the_same_view_boundaries(self) -> None:
+        invalid = (
+            "Structure\n--------",
+            "  ## Structure",
+            "##  Structure",
+            "##\tStructure",
+            "## Structure ##",
+            "## Structure  ",
+            "##",
+        )
+        for heading in ("## Structure", *invalid):
+            with self.subTest(heading=heading):
+                self.make_v04(
+                    self.current,
+                    {
+                        "mod/mod.h.md": (
+                            "A source locator.\n"
+                            + heading
+                            + "\n```\n  source locator    definition\n```\n"
+                        )
+                    },
+                )
+                result = self.run_command("check_bare.py", self.current)
+                if heading == "## Structure":
+                    self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                    self.assertIn("prose.bare-compound", result.stdout)
+                else:
+                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                    self.assertNotIn("prose.bare-compound", result.stdout)
+
     def test_check_part_is_always_a_migration_shim(self) -> None:
         for arguments in ((), ("header", "decisions", "MOD"), ("--help",)):
             with self.subTest(arguments=arguments):
@@ -754,8 +870,16 @@ class FormatterCase(CommandFixtures):
         second = self.run_command("fmt.py", self.current)
         self.assertIn("formatted: 0", second.stdout)
 
-    def test_atx_heading_variants_open_views(self) -> None:
-        for heading in ("## Structure", "   ## Structure ###"):
+    def test_only_plain_atx_named_headings_open_views(self) -> None:
+        invalid = (
+            "  ## Structure",
+            "##  Structure",
+            "##\tStructure",
+            "## Structure ##",
+            "## Structure  ",
+            "##",
+        )
+        for heading in ("## Structure", *invalid):
             with self.subTest(heading=heading):
                 original = (
                     heading + "\n"
@@ -764,7 +888,11 @@ class FormatterCase(CommandFixtures):
                     "           three\n"
                     "```\n"
                 )
-                expected = original.replace("  alpha    one two\n           three", "  alpha    one two three")
+                expected = (
+                    original.replace("  alpha    one two\n           three", "  alpha    one two three")
+                    if heading == "## Structure"
+                    else original
+                )
                 self.write(self.current, "mod.h.md", original)
                 first = self.run_command("fmt.py", self.current)
                 self.assertEqual(0, first.returncode, first.stdout + first.stderr)
@@ -772,20 +900,63 @@ class FormatterCase(CommandFixtures):
                 second = self.run_command("fmt.py", self.current)
                 self.assertIn("formatted: 0", second.stdout)
 
-    def test_setext_heading_does_not_open_a_view(self) -> None:
+    def test_only_plain_atx_h1_and_h2_close_views(self) -> None:
+        closing = ("# Outside", "## Outside")
+        nonclosing = (
+            "Outside\n--------",
+            "  # Outside",
+            "##  Outside",
+            "#\tOutside",
+            "## Outside ##",
+            "## Outside  ",
+            "##",
+            "### Outside",
+        )
+        for heading in (*closing, *nonclosing):
+            with self.subTest(heading=heading):
+                original = (
+                    "## Structure\n"
+                    + heading
+                    + "\n```\n  alpha    one two\n           three\n```\n"
+                )
+                expected = (
+                    original.replace("  alpha    one two\n           three", "  alpha    one two three")
+                    if heading in nonclosing
+                    else original
+                )
+                self.write(self.current, "mod.h.md", original)
+                first = self.run_command("fmt.py", self.current)
+                self.assertEqual(0, first.returncode, first.stdout + first.stderr)
+                self.assertEqual(expected, (self.current / "mod.h.md").read_text(encoding="utf-8"))
+                second = self.run_command("fmt.py", self.current)
+                self.assertIn("formatted: 0", second.stdout)
+
+    def test_four_space_fence_like_line_does_not_open_or_hide_content(self) -> None:
         original = (
-            "Structure\n"
-            "--------\n"
-            "```\n"
+            "## Structure\n"
+            "    ```\n"
             "  alpha    one two\n"
             "           three\n"
-            "```\n"
         )
         self.write(self.current, "mod.h.md", original)
         result = self.run_command("fmt.py", self.current)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn("formatted: 0", result.stdout)
         self.assertEqual(original, (self.current / "mod.h.md").read_text(encoding="utf-8"))
+
+    def test_setext_heading_does_not_open_a_view(self) -> None:
+        for underline in ("--------", "========"):
+            with self.subTest(underline=underline):
+                original = (
+                    "Structure\n"
+                    + underline
+                    + "\n```\n  alpha    one two\n           three\n```\n"
+                )
+                self.write(self.current, "mod.h.md", original)
+                result = self.run_command("fmt.py", self.current)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertIn("formatted: 0", result.stdout)
+                self.assertEqual(original, (self.current / "mod.h.md").read_text(encoding="utf-8"))
 
     def test_real_rich_view_rewraps_and_is_idempotent(self) -> None:
         repository = TEST_DIR.parents[3]
