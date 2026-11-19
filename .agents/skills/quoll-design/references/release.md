@@ -19,16 +19,19 @@ Work a `release` ticket with the person. A release without source changes needs 
    title="${package##*/} $version"
    paragraph='<one plain-text paragraph of semantic package changes>'
    ```
-   Write its `paragraph` as exactly one plain-text paragraph of semantic package changes: no title duplication, commit list, Markdown structure, links, cross-references or coordination metadata. Do not create a notes file or release TOML.
-3. Preflight local CLI compatibility before drafting the write batch:
+   Write its `paragraph` as exactly one plain-text paragraph of semantic package changes: no title duplication, commit list, Markdown structure, links, cross-references or coordination metadata. Do not create a notes file or release TOML. After package selection, set `latest_tag="language/$version"` from the shared version; every stable coordinated release marks this language tag's host release Latest after all packages verify, while a prerelease has no Latest write and preserves the existing stable Latest state.
+3. Preflight local CLI compatibility from the selected checkout before drafting the write batch:
    ```sh
    git --version
    gh --version
+   gh repo view --json nameWithOwner
    gh release create --help
+   gh release edit --help
+   gh release list --help
    gh issue close --help
    gh api --help
    ```
-   Confirm that the installed versions support every planned command and flag. Milestone operations use `gh api`; do not assume that a `gh milestone` command exists.
+   Run `gh repo view` without `--repo`, `-R` or another repository override so it resolves the repository exactly as host-release creation will; its `nameWithOwner` must equal the selected `repository`, and a mismatch stops the release before any write. Confirm that the installed versions support every planned command and every complete flag combination, not only each flag alone. In particular, `--notes-from-tag` reads the local annotated tag and supports no `--repo` or `-R` override; inspect the fully literal commands for this and other joint-option restrictions again before presenting the approval batch. Milestone operations use `gh api`; do not assume that a `gh milestone` command exists.
 4. Read the selected manifests' `dependencies` and order dependencies before dependents where applicable. Inspect every package's existing local tag, remote tag and host release before creating anything:
    ```sh
    git tag --list "$tag"
@@ -39,7 +42,13 @@ Work a `release` ticket with the person. A release without source changes needs 
    ```sh
    git fetch --no-tags "$remote" "refs/tags/$tag:refs/tags/$tag"
    ```
-   For every existing local tag, including one just fetched, use `git show --no-patch "$tag"` to inspect its type, full target and complete message, and `git rev-parse "$tag" "$tag^{}"` to read its object and peeled IDs. Compare every existing piece with the intended annotated tag, full commit, paragraph, title and prerelease state; an existing host release must also have `isDraft` equal to false. Compare local and remote tag object IDs and peeled commits so that a different remote object stops the release even when a local tag already exists. Skip only exact matches; any mismatch stops for the person. Never move, edit, delete, overwrite or automatically repair existing state.
+   For every existing local tag, including one just fetched, use `git show --no-patch "$tag"` to inspect its type, full target and complete message, and `git rev-parse "$tag" "$tag^{}"` to read its object and peeled IDs. Compare every existing piece with the intended annotated tag, full commit, paragraph, title and prerelease state; an existing host release must also have `isDraft` equal to false. Compare local and remote tag object IDs and peeled commits so that a different remote object stops the release even when a local tag already exists. Skip only exact matches; any mismatch stops for the person. Except for the separately approved Latest metadata action below, never move, edit, delete, overwrite or automatically repair existing state.
+   Inspect the current Latest projection and the host's canonical Latest endpoint:
+   ```sh
+   gh release list --repo "$repository" --limit 100 --json tagName,isLatest
+   gh api "repos/$repository/releases/latest"
+   ```
+   A not-found Latest endpoint is expected where no stable release exists. For a stable version, record the Latest action as completed only when the exact new language host release already stands and `latest_tag` is Latest; another Latest tag leaves the action missing, while any conflicting state involving a missing or mismatched language release stops for the person. For a prerelease, draft no Latest edit and retain the inspected stable release-list and endpoint state for the preservation check after publication.
 5. Inspect the release issue and its milestone. Read the milestone number from the issue and query its current state and open-issue count:
    ```sh
    gh issue view "$issue" --repo "$repository" --json number,state,title,milestone
@@ -47,15 +56,16 @@ Work a `release` ticket with the person. A release without source changes needs 
    ```
    The milestone is closed only after the release issue and every other issue in it are closed. An absent milestone needs no closure action.
 6. In the ticket's working directory, write `actions.md`: every write action by a stable name, its fully literal command, and its status as missing, completed, mismatched, failed, or unknown after interruption. Derive missing actions from the inspection above. Record read-only verification separately; it does not depend on write approval.
-7. Draft the write commands in dependency order, using the forms below with every placeholder replaced by its approved literal value:
+7. Draft the package write commands in dependency order, followed by the Latest and closure commands, using the forms below with every placeholder replaced by its approved literal value:
    ```sh
    git tag -a --cleanup=verbatim -m '<paragraph>' '<tag>' '<commit>'
    git push '<remote>' 'refs/tags/<tag>'
-   gh release create '<tag>' --repo '<repository>' --verify-tag --target '<commit>' --title '<title>' --notes-from-tag
+   gh release create '<tag>' --verify-tag --target '<commit>' --title '<title>' --notes-from-tag
+   gh release edit '<latest_tag>' --repo '<repository>' --latest
    gh issue close '<issue>' --repo '<repository>'
    gh api --method PATCH 'repos/<repository>/milestones/<milestone>' -f state=closed
    ```
-   Add `--prerelease` to a host-release command only when the canonical version has a prerelease suffix. Add no Latest policy or other metadata. Do not execute the closure commands at this stage; their conditions are checked below.
+   Add `--prerelease` to a host-release creation command only when the canonical version has a prerelease suffix. Draft the Latest edit only for a stable version; a prerelease has no Latest write because the host does not allow prereleases to be Latest. Add no Latest option or other metadata to creation: the separately approved stable-release Latest edit is the only Latest write and runs only after every package verifies. Do not execute the Latest or closure commands at this stage; their conditions are checked below.
 8. For Claude Code, draft one exact local allow rule for each literal write command as `Bash(<literal-command>)`, with no wildcard. Show the person the exact full commit, every literal tag and title, every complete paragraph, the ordered write commands, and the corresponding rule batch. The person reviews and merges the batch into `.claude/settings.local.json` in the editor, preserving existing entries, and saves it. Applying the batch is the explicit approval; the agent does not edit the protected settings file in auto mode. Under another harness, the person applies the equivalent reviewed commands through that harness's own permission mechanism.
 9. Execute each command exactly as approved: no variables, changed quoting, added flags, or substituted parameters. A `*` anywhere in a rule is a wildcard, even inside shell quotes, so a command containing one must be rewritten without it or left to the ordinary approval path. Any changed command requires a new exact rule. Deny and ask rules still take precedence, and no approval is cached across a different command.
 
@@ -81,10 +91,16 @@ Work through the packages in dependency order, creating only missing pieces.
    gh release view "$tag" --repo "$repository" --json tagName,targetCommitish,name,body,isPrerelease,isDraft
    ```
    Check the literal tag, full target, title and body against the approved values; `isPrerelease` must reflect only the version's prerelease suffix, and `isDraft` must be false.
-3. Only after every package verifies, run the approved literal issue-closure command. Verify that the issue is closed and inspect the milestone again:
+3. Only after every package verifies, reinspect the current Latest state. For a stable version, if the exact new language host release is not Latest, run the approved literal `gh release edit ... --latest` command; if it is already Latest, record the action as completed and run no edit. This action changes Latest metadata alone, never the approved tag, target, title, paragraph or prerelease state. For a prerelease, run no Latest edit. Verify both the visible marker and the canonical endpoint independently:
+   ```sh
+   gh release list --repo "$repository" --limit 100 --json tagName,isLatest
+   gh api "repos/$repository/releases/latest"
+   ```
+   For a stable version, the release list must show `isLatest` true for `latest_tag` and false for every other release, and the endpoint's `tag_name` must equal `latest_tag`; its release name, full target and other content must still match the verified language host release. For a prerelease, the release list must show `isLatest` false for `latest_tag`, and the release-list Latest value and endpoint must identify the same stable state recorded before publication, with a not-found endpoint still standing where no stable release exists. Any mismatch stops the sequence for the person before issue closure.
+4. Only after every package and the Latest projection verify, run the approved literal issue-closure command. Verify that the issue is closed and inspect the milestone again:
    ```sh
    gh issue view "$issue" --repo "$repository" --json number,state,milestone
    gh api "repos/$repository/milestones/$milestone"
    ```
-4. Close the milestone only when its current `open_issues` is zero and its state is open. Run the approved literal `gh api --method PATCH ... -f state=closed` command, then query the milestone again and record `state=closed`. If issues remain open, leave the milestone open and stop for the person.
-5. Record every completed and remaining action in `actions.md`, perform the final read-only verification independently of the now-finished write approvals, and ask the person to remove the task's exact local rules.
+5. Close the milestone only when its current `open_issues` is zero and its state is open. Run the approved literal `gh api --method PATCH ... -f state=closed` command, then query the milestone again and record `state=closed`. If issues remain open, leave the milestone open and stop for the person.
+6. Record every completed and remaining action in `actions.md`, perform the final read-only verification independently of the now-finished write approvals, including both Latest reads, and ask the person to remove the task's exact local rules.
