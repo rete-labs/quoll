@@ -1,4 +1,4 @@
-Native file-system places, whole files and directory trees, with explicit unsuccessful outcomes and no dependency on another package.
+Native file-system places, whole files and directory trees, with explicit unsuccessful outcomes and no dependency on another [package].
 
 ## Structure
 

@@ -1,3 +1,6 @@
++++
+prelude = []
++++
 **GRAM-1.** *Superseded by* GRAM-30
 
 **GRAM-30. Write the canonical public [manifest] as structured identity, edition, description and dependency [selector]s.**
@@ -44,7 +47,7 @@
 **GRAM-5. Open each [layout.header], [layout.private header] and [layout.body] with a [lead], a whole paragraph however many lines it runs over.**
 *Stated by* [lead].
 *Because* a [layout.source file]'s opening paragraph is what a reader meets first, in an editor as on a site, and it is [markdown] with [reference]s, as the rest of the [layout.source file] is.
-*Because* a [front] keeps to relations, aliases and the module-lead declaration, outside the prose they serve.
+*Because* a [front] keeps to relations, aliases, edition-prelude selection and the module-lead declaration, outside the prose they serve.
 *Because* every [layout.body] is then read alike, its [lead] read off its [own text] wherever the [layout.body] stands (GRAM-20).
 *Because* a [lead] an editor wraps is still the paragraph the language means.
 *Accepting* a paragraph the language places between the [front] and the first [view].
@@ -89,15 +92,17 @@
 
 **GRAM-9.** *Superseded by* GRAM-32
 
-**GRAM-32. Write every canonical Quoll-owned structured file and [front] in [toml], and declare canonical PURL and qualified-name aliases in one `aliases` table.**
+**GRAM-32. Write every canonical Quoll-owned structured file and [front] in [toml], declaring explicit renames in `aliases` and prefix-grouped path stripping in `use`.**
 *Stated by* [toml], [front], [workspace manifest], [modules] and [canonical toml].
 *Because* explicit scalar types and a simple table model give tools an exact edit boundary without implicit conversions, anchors or a custom configuration language, while short [manifest]s and aliases remain comfortable to read and write.
 *Because* one structured syntax serves pure [manifest]s, membership, [lock]s and [front] matter, and `+++` keeps that [front] matter distinct from the Markdown it precedes.
-*Because* one alias mapping handles PURL and qualified-name targets where [reference]s are used, with Package URL versus qualified-[reference] syntax telling the target kinds apart; an unversioned target follows ordinary version updates, while a [selector] target distinguishes simultaneously visible versions.
-*Because* a [layout.decisions] or [layout.workspace decisions] uses the same [reference]s, so its [front] admits the same `aliases` table and no implementation, inclusion or module-lead declaration.
+*Because* a [workspace manifest] names an edition for the [layout.workspace]'s own files while member [manifest]s name their own, giving [layout.workspace decisions] deterministic grammar and history without making a member's meaning depend on its originating [layout.workspace].
+*Because* one `aliases` mapping handles explicit PURL and qualified-name renames where [reference]s are used, with Package URL versus qualified-[reference] syntax telling the target kinds apart; an unversioned target follows ordinary version updates, while a [selector] target distinguishes simultaneously visible versions.
+*Because* a quoted `use` key states a complete abstract prefix once and its TOML string array states exactly the desired relative continuations, retaining each continuation's final segment as its local name without wildcard or brace-expansion syntax.
+*Because* a [layout.decisions] or [layout.workspace decisions] uses the same [reference]s, so its [front] admits the same `prelude`, `aliases` and `use` forms and no implementation, inclusion or module-lead declaration.
 *Because* the boolean `"module lead" = true` marks the owning [layout.header] where no [layout.body] or default [layout.header] supplies the [lead], without making that [layout.header] a default or moving its [lead] into membership metadata.
-*Accepting* a TOML parser dependency, arrays of tables in generated [lock]s, explicit quoting, two target grammars in one alias table, an aliases-only [front] on [layout.decisions] and [layout.workspace decisions], qualified-name targets within the declaring file's sight including same-package internal items, whose resolution and public exposure remain the source join's to check, and one front-matter boolean whose cardinality is the source join's to check.
-*Rejected* YAML, whose broader grammar and implicit typing need restriction and careful canonicalization; JSON, whose hand-facing forms are more verbose and comment-free; splitting TOML and JSON by file kind, which doubles parsers and serializers; comment-enabled JSON variants, whose implementations vary; separate PURL and qualified-name alias mappings, which add structure without expressive power; package-global aliases, which turn a local [reference] convenience into global naming policy; and descriptions in [modules], which duplicate the owning [lead]s and drift.
+*Accepting* a TOML parser dependency, arrays of tables in generated [lock]s, explicit quoting, two target grammars in the rename table, quoted prefix keys and relative-continuation validation in grouped declarations, alias-only fronts apart from edition selection in [layout.decisions] and [layout.workspace decisions], qualified-name targets within the declaring file's sight including same-package internal [model.kernel.item]s, whose resolution and public exposure remain the source join's to check, and one front-matter boolean whose cardinality is the source join's to check.
+*Rejected* YAML, whose broader grammar and implicit typing need restriction and careful canonicalization; JSON, whose hand-facing forms are more verbose and comment-free; splitting TOML and JSON by file kind, which doubles parsers and serializers; comment-enabled JSON variants, whose implementations vary; separate PURL and qualified-name rename mappings, which add structure without expressive power; a flat `use` string array, which repeats each shared prefix; brace groups inside reference strings, which add an expansion parser and escaping diagnostics; package-global aliases, which turn a local [reference] convenience into global naming policy; and descriptions in [modules], which duplicate the owning [lead]s and drift.
 *Formerly* the renderer's SYN-15 and SYN-27.
 
 **GRAM-10. Write an active [layout.decisions] [entry] with its `*Stated by*` first, naming [item]s alone, an active [layout.workspace decisions] [entry] with its rationale directly and no `*Stated by*`, and a superseded [entry] as one titleless line holding only its ID and successor pointer.**
@@ -182,16 +187,17 @@
 *Because* a bare ID is then read within its own [entry] file alone, its mnemonic showing which that is (GRAM-17).
 *Formerly* the renderer's SYN-16, in part.
 
-**GRAM-25. Write the language's six [core word]s bare, as words of text, in every [layout.package].**
-*Stated by* [core word] and [used].
-*Because* every [layout.package] speaks of what it is made of in the language's terms, and these six are the types every [layout.source file] of every [layout.package] speaks of, the list a newcomer learns first.
-*Because* a keyword is written bare in every language engineers read, while brackets around words every [layout.source file] uses would mark nearly every sentence.
-*Because* a word of text that reserves no name takes nothing from writers: a [layout.package]'s own `package` stays its own, written as a [reference].
-*Because* an [item]'s defining name, a heading the language names, a [label] and a link's destination each mark a [construct] or a target rather than speak of the language's terms.
-*Because* the language's own [layout.package] follows the same six-word rule as every other, so self-definition needs no separate lexical rule; what a [core word] names, and at which edition, is the meaning's (GRAM-20).
-*Accepting* six words that, written bare in any [layout.package], are the language's terms rather than plain English; and a list this part keeps in step with the definition's terms by hand, as a language's keywords are listed in its lexical grammar.
-*Revisit* the list when a concrete reading burden and an unambiguous lexical case justify an edition change.
-*Rejected* the words plain, defined nowhere a reader of the definition looks; three words alone, `package`, `module` and `interface`, leaving out types every [layout.source file] speaks of; adding `uses`, whose ordinary English senses would acquire model meaning without a demonstrated benefit; every term the definition defines, a list this part could keep only as text in step with another's by hand; a separate rule for the language's own [layout.package], which makes self-definition an exception to the lexical grammar; a [core word] reserving its name, which takes from every [layout.package] a name it may want; any letters after a listed word an inflection, which makes `projection` and `packaging` [core word]s; and a [core word] wherever its word stands bare, which makes an [item]'s defining name and a named heading one.
+**GRAM-25.** *Superseded by* GRAM-37
+
+**GRAM-37.** *Superseded by* GRAM-38
+
+**GRAM-38. Write every use of a name in scope as a [reference], with the optional `prelude` of each [layout.source file] in a [model.graph.package] or [model.graph.workspace] selecting its own edition's fixed bindings.**
+*Stated by* [reference], [front], [used] and [stated].
+*Because* one visibly bracketed spelling then serves every intended reference to a model [model.kernel.item], while the same words in another sense remain ordinary English and no separate lexical family or inflection rules acquire hidden model meaning.
+*Because* one optional list-valued key expresses the edition selection in the file where its [reference]s stand, without a second package-level reading input or inheritance chain; grammar recognizes its form but holds no model targets or fixed name list.
+*Because* package and [layout.workspace decisions] use the same per-file selection and fixed bindings, removing the former special workspace exception; a [model.graph.workspace] names an edition for its own files and no member [model.graph.package] inherits it.
+*Accepting* heavier punctuation in prose, per-file default, disabled and selective declarations in package and [layout.workspace files] alike, removal of the core-word construct and its special capitalization and inflection handling, and no canonical syntax imposed on native representations.
+*Rejected* the six bare core words, which give ordinary English hidden model meaning; retaining bare and bracketed canonical spellings together, which preserves a lasting style split; a broader extensible lexical vocabulary, which expands the special namespace before concrete consumers justify it; grammar-owned model targets, which collapse own-text reading into semantic resolution; the former no-edition, no-prelude workspace exception, which leaves durable workspace notation without an explicit authority and preserves a second rule; using a workspace edition as a member default, which violates package self-containment; and reinterpreting an existing edition's spelling in place, which makes already written source nondeterministic.
 
 **GRAM-26. Keep how [layout.tests] are written open until a [layout.package] has some.**
 *Stated by* [tests].
@@ -231,7 +237,7 @@
 
 **GRAM-36. Declare exposed names and paths in an `exposes` table in an existing [layout.header] or [layout.private header].**
 *Stated by* [front].
-*Because* an exposure belongs to the existing module whose sight covers its target, so its declaration needs no additional [layout.source file] or duplicated contract.
+*Because* an exposure belongs to the existing [model.kernel.module] whose sight covers its target, so its declaration needs no additional [layout.source file] or duplicated contract.
 *Because* one TOML mapping gives each exposed name or dotted path one exact target spelling, using the existing [reference] form and quoted dotted keys rather than another path grammar.
-*Accepting* intermediate declarations in [layout.private header]s and several paths for one target; an exposure creating no module, interface or item; no `exposes` key in a [layout.body], [layout.decisions] or [layout.workspace decisions]; the existing `includes`, `implements`, `aliases` and module-lead forms keeping their own contexts, with `includes` neither renamed nor made an exposure declaration; and target resolution, path uniqueness, sibling-name uniqueness and root reachability remaining outside this grammar.
-*Rejected* one facade [layout.header] per exposure, which creates a second contract and competes with a same-named module; and a central package exposure manifest, which separates an exposure from the module sight that authorizes it.
+*Accepting* intermediate declarations in [layout.private header]s and several paths for one target; an exposure creating no [model.kernel.module], [model.kernel.interface] or [model.kernel.item]; no `exposes` key in a [layout.body], [layout.decisions] or [layout.workspace decisions]; the existing `includes`, `implements`, `prelude`, `use`, `aliases` and module-lead forms keeping their own contexts, with `includes` neither renamed nor made an exposure declaration; and target resolution, path uniqueness, sibling-name uniqueness and root reachability remaining outside this grammar.
+*Rejected* one facade [layout.header] per exposure, which creates a second contract and competes with a same-named [model.kernel.module]; and a central [model.graph.package] exposure manifest, which separates an exposure from the [model.kernel.module] sight that authorizes it.

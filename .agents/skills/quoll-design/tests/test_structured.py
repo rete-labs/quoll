@@ -58,7 +58,7 @@ class PackageFixtures:
         dependency_text = ", ".join(repr(item).replace("'", '"') for item in (dependencies or []))
         self.write(
             "package.quoll.toml",
-            f'id = "{PID}"\nedition = "0.4.0"\ndescription = "Demo."\n'
+            f'id = "{PID}"\nedition = "0.6.0"\ndescription = "Demo."\n'
             f"dependencies = [{dependency_text}]\n",
         )
         self.write("modules.quoll.toml", modules)
@@ -95,9 +95,10 @@ class PackageCase(PackageFixtures, unittest.TestCase):
         self.write("alpha/alpha.h.md", "Legacy header.\n")
         package = load_package(self.root, baseline=True)
         self.assertIn("manifest.required", {finding.rule for finding in package.findings})
-        self.assertIn("source.placement", {finding.rule for finding in package.findings})
+        self.assertIn("manifest.edition", {finding.rule for finding in package.findings})
+        self.assertNotIn("source.placement", {finding.rule for finding in package.findings})
 
-    def test_baseline_flag_does_not_change_current_v04_rules(self) -> None:
+    def test_baseline_flag_does_not_bypass_current_edition_gate(self) -> None:
         self.write("package.md", "---\nname: old\n---\n")
         package = load_package(self.root, baseline=True)
         self.assertIn("manifest.required", {finding.rule for finding in package.findings})
@@ -138,7 +139,7 @@ class PackageCase(PackageFixtures, unittest.TestCase):
                         "package.lock.quoll.toml",
                     ):
                         text = "id = [" if other == filename else (
-                            'id = "pkg:quoll/example.com/x"\nedition = "0.4.0"\n'
+                            'id = "pkg:quoll/example.com/x"\nedition = "0.6.0"\n'
                             'description = "x"\ndependencies = []\n'
                             if other == "package.quoll.toml"
                             else "modules = []\n" if other == "modules.quoll.toml" else "dependencies = []\n"
@@ -150,7 +151,7 @@ class PackageCase(PackageFixtures, unittest.TestCase):
     def test_required_files_and_exact_schemas(self) -> None:
         package = load_package(self.root)
         self.assertEqual(
-            {"manifest.required", "modules.required", "lock.required"},
+            {"manifest.required", "manifest.edition", "modules.required", "lock.required"},
             {finding.rule for finding in package.findings},
         )
         self.write(
@@ -160,9 +161,15 @@ class PackageCase(PackageFixtures, unittest.TestCase):
         )
         self.write("modules.quoll.toml", 'modules = ["../escape"]\nother = []\n')
         self.write("package.lock.quoll.toml", "dependencies = {}\nother = []\n")
+        early_rules = {finding.rule for finding in load_package(self.root).findings}
+        self.assertIn("manifest.keys", early_rules)
+        self.assertIn("manifest.type", early_rules)
+        self.assertIn("manifest.edition", early_rules)
+        self.write(
+            "package.quoll.toml",
+            f'id = "{PID}"\nedition = "0.6.0"\ndescription = "Demo"\ndependencies = []\n',
+        )
         rules = {finding.rule for finding in load_package(self.root).findings}
-        self.assertIn("manifest.keys", rules)
-        self.assertIn("manifest.type", rules)
         self.assertIn("modules.path", rules)
         self.assertIn("modules.keys", rules)
         self.assertIn("lock.type", rules)
@@ -488,7 +495,7 @@ class PackageCase(PackageFixtures, unittest.TestCase):
             extract_refs("A [label](https://example.com) and [real.item]."),
         )
 
-    def test_real_language_structured_files(self) -> None:
+    def test_current_language_structured_files(self) -> None:
         repository = TEST_DIR.parents[3]
         self.assertEqual([], [str(finding) for finding in structured_findings(repository / "language")])
 
@@ -514,12 +521,21 @@ class PackageCase(PackageFixtures, unittest.TestCase):
                 "GRAM-6": "GRAM-31",
                 "GRAM-9": "GRAM-32",
                 "GRAM-12": "GRAM-33",
+                "GRAM-25": "GRAM-37",
+                "GRAM-37": "GRAM-38",
             },
-            "model/model.decisions.md": {"MODEL-20": "MODEL-27"},
+            "model/model.decisions.md": {
+                "MODEL-20": "MODEL-27",
+                "MODEL-44": "MODEL-45",
+            },
             "source/source.decisions.md": {
                 "SOURCE-4": "SOURCE-14",
                 "SOURCE-5": "SOURCE-15",
                 "SOURCE-7": "SOURCE-16",
+                "SOURCE-10": "SOURCE-20",
+                "SOURCE-13": "SOURCE-23",
+                "SOURCE-19": "SOURCE-21",
+                "SOURCE-20": "SOURCE-22",
             },
         }
         sources = {source.path: source for source in package.files if source.path in expected}
@@ -534,11 +550,17 @@ class PackageCase(PackageFixtures, unittest.TestCase):
                         self.assertEqual(successor_id, stub.successor)
                         self.assertEqual({"superseded by"}, {key.casefold() for key in stub.fields})
                         self.assertEqual(1, len([line for line in stub.text.splitlines() if line.strip()]))
-                        if successor_id in decisions:
-                            self.assertTrue(decisions[successor_id].active)
+                        terminal = successor_id
+                        seen: set[str] = set()
+                        while terminal in decisions and not decisions[terminal].active:
+                            self.assertNotIn(terminal, seen)
+                            seen.add(terminal)
+                            terminal = decisions[terminal].successor
+                        if terminal in decisions:
+                            self.assertTrue(decisions[terminal].active)
                         else:
                             self.assertEqual("QUOLL-8", old_id)
-                            successor = workspace_decisions[successor_id]
+                            successor = workspace_decisions[terminal]
                             self.assertTrue(successor.active)
                             self.assertEqual("QUOLL-8", successor.fields["Formerly"])
         self.assertEqual([], [str(finding) for finding in decision_lifetime_findings(package)])

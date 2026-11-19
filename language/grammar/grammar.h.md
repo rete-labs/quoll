@@ -1,3 +1,6 @@
++++
+prelude = []
++++
 How a canonical Quoll [layout.source file] is written, for whoever writes one, person or agent, and for any tool that reads one: the [markdown] or [toml] it is written in, and the language's [construct]s within it and, a [front], before it, each read as [own text] has it; its [native form], [native overlay], [native link], [target map] and [tests] remain open.
 
 ## Structure
@@ -45,15 +48,6 @@ How a canonical Quoll [layout.source file] is written, for whoever writes one, p
                       holds it, outside square brackets, with neither a letter, a digit nor a hyphen
                       just before it nor a digit or a hyphen just after it, but where it opens its
                       own [entry], an ID of another mnemonic being text
-  core word           one of the words `workspace`, `package`, `module`, `interface`, `item` and
-                      `decision`, written bare as a whole word in text alone, an [item]'s statement,
-                      an [entry]'s lines or a paragraph, and never an [item]'s name where the [item]
-                      is defined, a heading the language names, a [label] or a link's destination;
-                      the word followed by `s`, `'s` or `s'`, its plural or possessive, as
-                      `modules`, is the word, and so is any of these forms with a capital where it
-                      opens a sentence, while any other word opening with one is text; a bracketed
-                      span is a [reference], never a [core word]
-
   package id          in canonical Quoll, an unversioned Package URL of the form
                       `pkg:quoll/<trust-domain>/<arbitrary-path>/<pkg-name>`: the trust domain is
                       mandatory, the remaining namespace path is user-defined, and the final segment
@@ -91,26 +85,32 @@ How a canonical Quoll [layout.source file] is written, for whoever writes one, p
   front               the lines from a `+++` line a [layout.header], a [layout.private header], a
                       [layout.body], a [layout.decisions] or a [layout.workspace decisions] opens
                       with to the next `+++` line: [toml], no part of its [markdown] text, which is
-                      the lines after them, so that they hold no heading, [reference], [label] or
-                      [core word]; a TOML mapping whose keys are the language's, `implements`, in a
-                      [layout.body], and `includes`, in a [layout.header] or a
-                      [layout.private header], each holding a TOML list of names; `exposes`, in a
-                      [layout.header] or [layout.private header], a table whose every key is an
-                      exposed name or dotted path and whose every value is a TOML string holding its
-                      target's [reference] spelling, without brackets; in canonical Quoll,
-                      `aliases`, a table whose values are strings; and `"module lead"`, in a
-                      [layout.header] or [layout.private header], holding the boolean `true`; in a
-                      [layout.decisions] or [layout.workspace decisions], `aliases` alone is a key
-                      the language names there; each name in `implements` or `includes`, each
-                      `exposes` key and the content of each `exposes` value are written as a
-                      [reference]'s bracketed name is, without its brackets, a dotted `exposes` key
-                      quoted whole as one TOML key, as `archy = "hier.archy"` and
-                      `"foo.bar" = "hier.foo.bar"`; each `aliases` value is a [package id], a
-                      [selector], or such a qualified name; a key the language does not name there,
-                      or one it names whose value is not of that form, is no part of the [front],
-                      nor are the lines of its value; and where the opening `+++` line has no
-                      closing one, or the lines between the two are no TOML mapping, the
-                      [layout.source file] has no [front], those lines part of its [markdown] text
+                      the lines after them, so that they hold no heading, [reference] or [label]; a
+                      TOML mapping whose keys are the language's, `implements`, in a [layout.body],
+                      and `includes`, in a [layout.header] or a [layout.private header], each
+                      holding a TOML list of names; `exposes`, in a [layout.header] or
+                      [layout.private header], a table whose every key is an exposed name or dotted
+                      path and whose every value is a TOML string holding its target's [reference]
+                      spelling, without brackets; in canonical Quoll, `prelude`, in a
+                      [layout.header], [layout.private header], [layout.body], [layout.decisions] or
+                      [layout.workspace decisions], holding a TOML list of strings; `use`, in any of
+                      those, a table whose keys are strings and whose values are TOML lists of
+                      strings; `aliases`, in the same files, a table whose values are strings; and
+                      `"module lead"`, in a [layout.header] or [layout.private header], holding the
+                      boolean `true`; in a [layout.decisions] or [layout.workspace decisions],
+                      `prelude`, `use` and `aliases` alone are keys the language names there; each
+                      name in `implements` or `includes`, each `exposes` key and the content of each
+                      `exposes` value are written as a [reference]'s bracketed name is, without its
+                      brackets, a dotted `exposes` key quoted whole as one TOML key, as
+                      `archy = "hier.archy"` and `"foo.bar" = "hier.foo.bar"`; each `use` key is
+                      such a qualified name, quoted whole, and each string in its value writes an
+                      explicit relative continuation as a [reference]'s bracketed name is written;
+                      each `aliases` value is a [package id], a [selector], or such a qualified
+                      name; a key the language does not name there, or one it names whose value is
+                      not of that form, is no part of the [front], nor are the lines of its value;
+                      and where the opening `+++` line has no closing one, or the lines between the
+                      two are no TOML mapping, the [layout.source file] has no [front], those lines
+                      part of its [markdown] text
   lead                one paragraph, its text however many lines it runs over, where a
                       [layout.source file] of its kind holds one: in a [layout.header], a
                       [layout.private header] or a [layout.body], the one it opens with, nothing but
@@ -144,8 +144,8 @@ How a canonical Quoll [layout.source file] is written, for whoever writes one, p
   literal             text taken as written: a code span, a fenced block other than a [view block],
                       and a task box, `[ ]` or `[x]` opening a line of a list; within a
                       [view block], where [markdown] finds no code span, one runs from a run of
-                      backticks to the next run as long on its line; such text holds no [reference],
-                      no [core word] and no [label]
+                      backticks to the next run as long on its line; such text holds no [reference]
+                      and no [label]
   view                a [section] headed `Structure`, `Flow` or `Rules`, its pieces which of the
                       three it is and its [view block], the [section]'s first fenced block
 
@@ -156,9 +156,10 @@ How a canonical Quoll [layout.source file] is written, for whoever writes one, p
                       their unversioned [package id] within one major compatibility series, so
                       distinct major series of one [package id] may coexist
   workspace manifest  in canonical Quoll, the [toml] of a [layout.workspace manifest]: a mapping
-                      holding exactly `packages`, a list of workspace-relative [layout.path]s, and
-                      `description`, a quoted short statement of what the [layout.workspace]
-                      maintains
+                      holding exactly `packages`, a list of workspace-relative [layout.path]s,
+                      `edition`, a quoted version of the language's definition fixing the grammar
+                      and source meaning of the [layout.workspace]'s own files, and `description`, a
+                      quoted short statement of what the [layout.workspace] maintains
   modules             in canonical Quoll, the [toml] of a [layout.modules]: a mapping holding
                       exactly `modules`, a list of package-relative [layout.path]s
   lock                in canonical Quoll, the [toml] of a [layout.lock]: an array of `dependencies`
@@ -176,9 +177,9 @@ How a canonical Quoll [layout.source file] is written, for whoever writes one, p
                       [toml] or, a [front], before [markdown], one of: a [front], a [section], a
                       [lead], a [view], a [view block], an [item], an [opener], a [label], a
                       [reference], an [entry], a [package id], a [selector], a [release tag], a
-                      [source locator], a [manifest], a [workspace manifest], a [modules], a [lock],
-                      an [assembly] or a [core word]; its pieces, the things a statement here names
-                      as its, as an [item]'s name and statement and the [label]s that end it
+                      [source locator], a [manifest], a [workspace manifest], a [modules], a [lock]
+                      or an [assembly]; its pieces, the things a statement here names as its, as an
+                      [item]'s name and statement and the [label]s that end it
 
   open:
     native form        native manifests, requirement grammars, resolvers and locks stay with their
@@ -206,9 +207,9 @@ How a canonical Quoll [layout.source file] is written, for whoever writes one, p
                     `[foo]: https://foo.example/`
 
     used            every use of a name in scope, in the sense of what it names, in [markdown] text,
-                    is a [reference], but an [item]'s own name where the [item] is defined and a
-                    [core word]; a name in a [front] or another [toml] value is written as that
-                    value's [construct] has it; the name's word in another sense is text
+                    is a [reference], but an [item]'s own name where the [item] is defined; a name
+                    in a [front] or another [toml] value is written as that value's [construct] has
+                    it; the name's word in another sense is text
     examples        an example of how a [layout.source file] is written, in [literal] text, names
                     nothing its [layout.package] defines and copies no statement of that
                     [layout.package], taking made-up names, as `foo`, `bar`, `baz` and `qux`
@@ -226,10 +227,9 @@ How a canonical Quoll [layout.source file] is written, for whoever writes one, p
     unique          the IDs of one [layout.decisions] or [layout.workspace decisions] share a
                     mnemonic no other uses
     stated          in a [layout.decisions], every active [entry]'s line after its first is its line
-                    under `*Stated by*`, holding [reference]s and bare [core word]s of its edition
-                    alone, each naming an [item], joined by commas and `and`, a multiword [item]'s
-                    name staying bracketed; an active [entry] of a [layout.workspace decisions]
-                    instead carries its rationale directly in its statement and later lines, with no
+                    under `*Stated by*`, holding [reference]s alone, each naming an [item], joined
+                    by commas and `and`; an active [entry] of a [layout.workspace decisions] instead
+                    carries its rationale directly in its statement and later lines, with no
                     `*Stated by*` line; a superseded [entry] instead holds only its one-line
                     `*Superseded by*` pointer, naming its successor
 

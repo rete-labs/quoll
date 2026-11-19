@@ -1,4 +1,4 @@
-"""Check a v0.4 package, optionally against a committed baseline."""
+"""Check a current 0.6.0 package or workspace against an optional baseline."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from quollcheck import Finding, Package, check_package, load_package  # noqa: E402
+from quollcheck import Finding, Package, check_package, check_workspace, load_package  # noqa: E402
 
 
 DESCRIPTION = "Print current or newly introduced package findings."
@@ -22,8 +22,9 @@ EPILOG = (
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=DESCRIPTION, epilog=EPILOG)
-    result.add_argument("current", metavar="CURRENT", help="current v0.4 package directory")
-    result.add_argument("--base", metavar="BASELINE", help="committed earlier v0.4 package")
+    result.add_argument("current", metavar="CURRENT", nargs="?", help="current 0.6.0 package directory")
+    result.add_argument("--workspace", metavar="WORKSPACE", help="check a workspace and each current member independently")
+    result.add_argument("--base", metavar="BASELINE", help="same-0.6.0 diff/lifetime baseline")
     result.add_argument(
         "--dependency",
         metavar="DEPENDENCY",
@@ -54,7 +55,10 @@ def gather(
     baseline: Package | None,
     dependencies: Iterable[Package] = (),
     review: bool = False,
+    workspace: bool = False,
 ) -> list[Finding]:
+    if workspace:
+        return check_workspace(current, baseline, review=review)
     return check_package(
         current,
         baseline,
@@ -84,11 +88,21 @@ def emit(findings: Iterable[Finding]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    if bool(args.current) == bool(args.workspace):
+        parser().error("name exactly one CURRENT package or --workspace WORKSPACE")
+    if args.workspace and args.dependency:
+        parser().error("--dependency is not part of the bounded workspace check")
     try:
         current, baseline, dependencies = load_inputs(
-            args.current, args.base, args.dependency
+            args.workspace or args.current, args.base, args.dependency
         )
-        findings = gather(current, baseline, dependencies, review=args.review)
+        findings = gather(
+            current,
+            baseline,
+            dependencies,
+            review=args.review,
+            workspace=bool(args.workspace),
+        )
     except (OSError, ValueError) as error:
         print(f"check_package.py: {error}", file=sys.stderr)
         return 2

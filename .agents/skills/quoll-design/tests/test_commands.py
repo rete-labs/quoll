@@ -26,7 +26,7 @@ class CommandFixtures(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(textwrap.dedent(text), encoding="utf-8")
 
-    def make_v04(
+    def make_current(
         self,
         root: Path,
         files: dict[str, str] | None = None,
@@ -34,13 +34,14 @@ class CommandFixtures(unittest.TestCase):
         modules: tuple[str, ...] = ("mod",),
         dependencies: tuple[str, ...] = (),
         name: str = "demo",
+        edition: str = "0.6.0",
     ) -> Path:
         package_id = PID if name == "demo" else f"pkg:quoll/example.com/{name}"
         dependency_text = ", ".join(f'"{dependency}"' for dependency in dependencies)
         self.write(
             root,
             "package.quoll.toml",
-            f'id = "{package_id}"\nedition = "0.4.0"\ndescription = "Demo."\ndependencies = [{dependency_text}]\n',
+            f'id = "{package_id}"\nedition = "{edition}"\ndescription = "Demo."\ndependencies = [{dependency_text}]\n',
         )
         self.write(
             root,
@@ -56,6 +57,32 @@ class CommandFixtures(unittest.TestCase):
             self.write(root, relative, text)
         return root
 
+    def make_workspace(
+        self,
+        root: Path,
+        decisions: str,
+        *,
+        workspace_edition: str = "0.6.0",
+        member_edition: str = "0.6.0",
+    ) -> Path:
+        self.write(
+            root,
+            "workspace.quoll.toml",
+            f'packages = ["member"]\nedition = "{workspace_edition}"\ndescription = "Workspace."\n',
+        )
+        self.write(root, "workspace.decisions.md", decisions)
+        self.make_current(
+            root / "member",
+            {
+                "member.h.md": '+++\n[exposes]\napi = "api"\n+++\nMember.\n',
+                "api.h.md": "## Structure\n```\n  run    public\n```\n",
+            },
+            modules=(),
+            name="member",
+            edition=member_edition,
+        )
+        return root
+
     def run_command(self, script: str, *arguments: object) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, "-I", str(SCRIPTS / script), *(str(argument) for argument in arguments)],
@@ -67,7 +94,7 @@ class CommandFixtures(unittest.TestCase):
 
 class MainCommandCase(CommandFixtures):
     def test_exit_zero_one_and_two(self) -> None:
-        self.make_v04(self.current)
+        self.make_current(self.current)
         clean = self.run_command("check_package.py", self.current)
         self.assertEqual(0, clean.returncode, clean.stderr)
         self.assertIn("errors: 0; reviews: 0", clean.stdout)
@@ -83,7 +110,7 @@ class MainCommandCase(CommandFixtures):
         self.assertIn("usage:", usage.stderr)
 
     def test_default_hides_reviews_and_review_prints_them_without_failing(self) -> None:
-        self.make_v04(
+        self.make_current(
             self.current,
             {
                 "mod/mod.h.md": """\
@@ -107,8 +134,8 @@ class MainCommandCase(CommandFixtures):
 
     def test_baseline_suppresses_unchanged_and_never_prints_baseline_defects(self) -> None:
         files = {"mod/mod.h.md": "An [old absent].\n"}
-        self.make_v04(self.current, files)
-        self.make_v04(self.baseline, files)
+        self.make_current(self.current, files)
+        self.make_current(self.baseline, files)
         unchanged = self.run_command("check_package.py", self.current, "--base", self.baseline)
         self.assertEqual(0, unchanged.returncode, unchanged.stdout + unchanged.stderr)
         self.assertNotIn("old absent", unchanged.stdout)
@@ -120,13 +147,13 @@ class MainCommandCase(CommandFixtures):
         self.assertNotIn("old absent", changed.stdout)
 
     def test_supplied_dependency_surface_resolves_current_references(self) -> None:
-        dependency = self.make_v04(
+        dependency = self.make_current(
             self.temp / "dependency",
             {"dep.h.md": '+++\n[exposes]\ndefault = "default"\n+++\n## Structure\n```\n  thing    provided\n```\n'},
             modules=(),
             name="dep",
         )
-        self.make_v04(
+        self.make_current(
             self.current,
             {"mod/mod.h.md": "A [dep.default.thing] and a [dep.default.missing].\n"},
             dependencies=("pkg:quoll/example.com/dep@v0.1.0",),
@@ -140,7 +167,7 @@ class MainCommandCase(CommandFixtures):
         self.assertNotIn("semantic.resolved dep.default.thing", supplied.stdout)
         self.assertNotIn("Traceback", supplied.stderr)
 
-        self.make_v04(
+        self.make_current(
             self.baseline,
             {"mod/mod.h.md": "A [dep.default.thing] and a [dep.default.missing].\n"},
             dependencies=("pkg:quoll/example.com/dep@v0.1.0",),
@@ -156,15 +183,145 @@ class MainCommandCase(CommandFixtures):
         self.assertNotIn("semantic.resolved", filtered.stdout)
 
     def test_malformed_package_is_a_finding_not_a_traceback(self) -> None:
-        self.make_v04(self.current)
+        self.make_current(self.current)
         self.write(self.current, "package.quoll.toml", "id = [\n")
         result = self.run_command("check_package.py", self.current)
         self.assertEqual(1, result.returncode)
         self.assertIn("toml.syntax", result.stdout)
         self.assertNotIn("Traceback", result.stdout + result.stderr)
 
+    def test_current_edition_is_validated_before_front_or_source_discovery(self) -> None:
+        declarations = (
+            'id = "pkg:quoll/example.com/demo"\ndescription = "Demo."\ndependencies = []\n',
+            'id = "pkg:quoll/example.com/demo"\nedition = 6\ndescription = "Demo."\ndependencies = []\n',
+            'id = "pkg:quoll/example.com/demo"\nedition = "0.6"\ndescription = "Demo."\ndependencies = []\n',
+            'id = "pkg:quoll/example.com/demo"\nedition = "0.5.0"\ndescription = "Demo."\ndependencies = []\n',
+            'id = "pkg:quoll/example.com/demo"\nedition = "0.4.0"\ndescription = "Demo."\ndependencies = []\n',
+        )
+        for declaration in declarations:
+            with self.subTest(declaration=declaration):
+                self.make_current(self.current)
+                self.write(self.current, "package.quoll.toml", declaration)
+                self.write(self.current, "mod/mod.h.md", "+++\nunknown = true\n+++\nA [missing].\n")
+                result = self.run_command("check_package.py", self.current)
+                self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                self.assertIn("manifest.edition", result.stdout)
+                self.assertNotIn("front.keys", result.stdout)
+                self.assertNotIn("semantic.resolved", result.stdout)
+
+    def test_old_baseline_is_rejected_in_base_role(self) -> None:
+        self.make_current(self.current)
+        self.make_current(self.baseline, edition="0.5.0")
+        current_old = self.run_command("check_package.py", self.baseline)
+        self.assertEqual(1, current_old.returncode)
+        self.assertIn("manifest.edition", current_old.stdout)
+        based = self.run_command("check_package.py", self.current, "--base", self.baseline)
+        self.assertEqual(1, based.returncode, based.stdout + based.stderr)
+        self.assertIn("manifest.edition", based.stdout)
+        self.assertIn("unsupported baseline edition 0.5.0", based.stdout)
+
+    def test_old_current_dependency_fails_without_reading_its_front(self) -> None:
+        dependency = self.make_current(
+            self.temp / "dependency",
+            {"dep.h.md": "+++\nunknown = true\n+++\nOld dependency.\n"},
+            modules=(),
+            name="dep",
+            edition="0.5.0",
+        )
+        self.make_current(
+            self.current,
+            dependencies=("pkg:quoll/example.com/dep@v1.0.0",),
+        )
+        result = self.run_command(
+            "check_package.py", self.current, "--dependency", dependency
+        )
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("manifest.edition", result.stdout)
+        self.assertNotIn("front.keys", result.stdout)
+
+    def test_workspace_cli_checks_members_decisions_use_and_same_edition_baseline(self) -> None:
+        decisions = """\
+            +++
+            [use]
+            "member.api" = ["run"]
+            +++
+            **W-1. Derived member reference**
+            *Because* [run] resolves publicly.
+            """
+        self.make_workspace(self.current, decisions)
+        self.make_workspace(self.baseline, decisions)
+        result = self.run_command(
+            "check_package.py", "--workspace", self.current, "--base", self.baseline, "--review"
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("errors: 0; reviews: 0", result.stdout)
+
+    def test_old_workspace_and_member_editions_are_rejected_before_front_parsing(self) -> None:
+        self.make_workspace(
+            self.current,
+            "+++\nunknown = true\n+++\n**W-1. Old workspace**\n",
+            workspace_edition="0.5.0",
+        )
+        old_workspace = self.run_command("check_package.py", "--workspace", self.current)
+        self.assertEqual(1, old_workspace.returncode, old_workspace.stdout + old_workspace.stderr)
+        self.assertIn("workspace.edition", old_workspace.stdout)
+        self.assertNotIn("front.keys", old_workspace.stdout)
+
+        self.make_workspace(self.current, "**W-1. Old member**\n", member_edition="0.5.0")
+        old_member = self.run_command("check_package.py", "--workspace", self.current)
+        self.assertEqual(1, old_member.returncode, old_member.stdout + old_member.stderr)
+        self.assertIn("manifest.edition", old_member.stdout)
+
+        self.make_workspace(self.current, "**W-1. Current workspace**\n")
+        self.make_workspace(self.baseline, "**W-1. Old workspace baseline**\n", workspace_edition="0.5.0")
+        old_workspace_base = self.run_command(
+            "check_package.py", "--workspace", self.current, "--base", self.baseline
+        )
+        self.assertEqual(1, old_workspace_base.returncode, old_workspace_base.stdout + old_workspace_base.stderr)
+        self.assertIn("workspace.edition", old_workspace_base.stdout)
+
+        self.make_workspace(self.baseline, "**W-1. Old member baseline**\n", member_edition="0.5.0")
+        old_member_base = self.run_command(
+            "check_package.py", "--workspace", self.current, "--base", self.baseline
+        )
+        self.assertEqual(1, old_member_base.returncode, old_member_base.stdout + old_member_base.stderr)
+        self.assertIn("manifest.edition", old_member_base.stdout)
+
+    def test_workspace_prelude_prose_and_lifetime(self) -> None:
+        old = "**W-1. Original**\n*Because* [member.api.run] is public.\n"
+        self.make_workspace(self.baseline, old)
+        self.make_workspace(
+            self.current,
+            '+++\nprelude = []\n+++\n**W-1. Original**\n*Because* [member.api.run] is public.\n',
+        )
+        accepted = self.run_command("check_package.py", "--workspace", self.current)
+        self.assertEqual(0, accepted.returncode, accepted.stdout + accepted.stderr)
+        self.assertNotIn("front.keys", accepted.stdout)
+
+        self.write(
+            self.current,
+            "workspace.decisions.md",
+            "**W-1. Revised**\n*Because* run remains public.\n",
+        )
+        reviewed = self.run_command(
+            "check_package.py", "--workspace", self.current, "--base", self.baseline, "--review"
+        )
+        self.assertEqual(0, reviewed.returncode, reviewed.stdout + reviewed.stderr)
+        self.assertIn("prose.bare-word", reviewed.stdout)
+        self.assertIn("lifetime.in-place-replacement", reviewed.stdout)
+
+    def test_plain_root_command_is_not_the_workspace_check(self) -> None:
+        self.make_workspace(self.current, "**W-1. Root only**\n*Because* Nothing changes.\n")
+        self.write(self.current, "member/api.h.md", "A [missing].\n")
+        plain = self.run_command("check_package.py", self.current)
+        self.assertEqual(0, plain.returncode, plain.stdout + plain.stderr)
+        self.assertNotIn("semantic.resolved", plain.stdout)
+        workspace = self.run_command("check_package.py", "--workspace", self.current)
+        self.assertEqual(1, workspace.returncode)
+        self.assertIn("semantic.resolved", workspace.stdout)
+
     def test_bare_command_filters_all_other_families(self) -> None:
-        self.make_v04(
+        self.make_current(
             self.current,
             {
                 "mod/mod.h.md": """\
@@ -203,7 +360,7 @@ class MainCommandCase(CommandFixtures):
             + "\n".join(variants)
             + "\n"
         )
-        self.make_v04(self.current, {"mod/mod.h.md": ordinary})
+        self.make_current(self.current, {"mod/mod.h.md": ordinary})
         result = self.run_command("check_package.py", self.current)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn("errors: 0; reviews: 0", result.stdout)
@@ -255,14 +412,14 @@ class MainCommandCase(CommandFixtures):
         )
         for source in cases:
             with self.subTest(source=source):
-                self.make_v04(self.current, {"mod/mod.h.md": source})
+                self.make_current(self.current, {"mod/mod.h.md": source})
                 result = self.run_command("check_package.py", self.current)
                 self.assertEqual(0, result.returncode, result.stdout + result.stderr)
                 self.assertIn("errors: 0; reviews: 0", result.stdout)
                 self.assertNotIn("markdown.setext-heading", result.stdout)
                 self.assertNotIn("markdown.atx-heading", result.stdout)
 
-        self.make_v04(
+        self.make_current(
             self.current,
             {
                 "mod/mod.h.md": (
@@ -287,7 +444,7 @@ class MainCommandCase(CommandFixtures):
         )
         for heading in ("## Structure", *invalid):
             with self.subTest(heading=heading):
-                self.make_v04(
+                self.make_current(
                     self.current,
                     {
                         "mod/mod.h.md": (
@@ -317,7 +474,7 @@ class MainCommandCase(CommandFixtures):
 
 
 class ReferenceSitesCase(CommandFixtures):
-    def test_v04_discovery_changed_and_gone_item_and_decision_sites(self) -> None:
+    def test_current_discovery_changed_and_gone_item_and_decision_sites(self) -> None:
         old_files = {
             "demo.h.md": "Before [D1].\n",
             "demo.decisions.md": "**D1. Original**\n\n**D2. Removed**\n",
@@ -334,8 +491,8 @@ class ReferenceSitesCase(CommandFixtures):
                 ~~~
                 """,
         }
-        self.make_v04(self.baseline, old_files)
-        self.make_v04(self.current, new_files)
+        self.make_current(self.baseline, old_files)
+        self.make_current(self.current, new_files)
         result = self.run_command("ref_sites.py", self.baseline, self.current)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("## mod.thing (changed)", result.stdout)
@@ -346,12 +503,12 @@ class ReferenceSitesCase(CommandFixtures):
         self.assertIn("## D2 (gone)", result.stdout)
 
     def test_toml_and_impl_relations_and_default_body_are_reported(self) -> None:
-        self.make_v04(
+        self.make_current(
             self.baseline,
             {"mod/mod.h.md": "## Structure\n```\n  thing    old\n```\n"},
             modules=("mod", "consumer"),
         )
-        self.make_v04(
+        self.make_current(
             self.current,
             {
                 "mod/mod.h.md": "## Structure\n```\n  thing    new\n```\n",
@@ -392,8 +549,8 @@ class ReferenceSitesCase(CommandFixtures):
         )
 
     def test_renamed_root_decisions_files_correspond_by_module(self) -> None:
-        self.make_v04(self.baseline, {"old.decisions.md": "**D1. Original**\n"})
-        self.make_v04(self.current, {"new.decisions.md": "**D1. Original**\n"})
+        self.make_current(self.baseline, {"old.decisions.md": "**D1. Original**\n"})
+        self.make_current(self.current, {"new.decisions.md": "**D1. Original**\n"})
         unchanged = self.run_command("ref_sites.py", self.baseline, self.current)
         self.assertEqual(0, unchanged.returncode, unchanged.stderr)
         self.assertNotIn("## D1", unchanged.stdout)
@@ -403,14 +560,14 @@ class ReferenceSitesCase(CommandFixtures):
         self.assertIn("## D1 (changed)", changed.stdout)
 
     def test_superseded_entries_are_neither_current_edits_nor_sites(self) -> None:
-        self.make_v04(
+        self.make_current(
             self.baseline,
             {
                 "demo.decisions.md": "**D1. Original**\n",
                 "mod/mod.h.md": "## Structure\n```\n  thing    old\n```\n",
             },
         )
-        self.make_v04(
+        self.make_current(
             self.current,
             {
                 "demo.decisions.md": """\
@@ -436,8 +593,8 @@ class ReferenceSitesCase(CommandFixtures):
     def test_malformed_old_and_new_toml_fail_closed(self) -> None:
         for side in ("old", "new"):
             with self.subTest(side=side):
-                old = self.make_v04(self.temp / f"{side}-old")
-                new = self.make_v04(self.temp / f"{side}-new")
+                old = self.make_current(self.temp / f"{side}-old")
+                new = self.make_current(self.temp / f"{side}-new")
                 broken = old if side == "old" else new
                 self.write(broken, "package.quoll.toml", "id = [\n")
                 result = self.run_command("ref_sites.py", old, new)
@@ -452,6 +609,24 @@ class ReferenceSitesCase(CommandFixtures):
         result = self.run_command("ref_sites.py")
         self.assertEqual(2, result.returncode)
         self.assertIn("usage:", result.stderr)
+        self.assertEqual("", result.stdout)
+
+    def test_old_baseline_is_rejected_by_textual_comparison(self) -> None:
+        self.make_current(
+            self.baseline,
+            {"mod/mod.h.md": "## Structure\n```\n  thing    old\n```\n"},
+            edition="0.5.0",
+        )
+        self.make_current(
+            self.current,
+            {
+                "demo.h.md": "Now [mod.thing].\n",
+                "mod/mod.h.md": "## Structure\n```\n  thing    new\n```\n",
+            },
+        )
+        result = self.run_command("ref_sites.py", self.baseline, self.current)
+        self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+        self.assertIn("manifest.edition", result.stderr)
         self.assertEqual("", result.stdout)
 
 
@@ -477,7 +652,7 @@ class BodyPairChangesCase(CommandFixtures):
     def test_each_same_named_pair_is_compared_independently(self) -> None:
         for relation in ("default", "api"):
             with self.subTest(relation=relation):
-                self.make_v04(
+                self.make_current(
                     self.baseline,
                     self.pair_files("old default", "unchanged api"),
                 )
@@ -485,7 +660,7 @@ class BodyPairChangesCase(CommandFixtures):
                     "default": "new default" if relation == "default" else "old default",
                     "api": "new api" if relation == "api" else "unchanged api",
                 }
-                self.make_v04(
+                self.make_current(
                     self.current,
                     self.pair_files(changed["default"], changed["api"]),
                 )
@@ -498,7 +673,7 @@ class BodyPairChangesCase(CommandFixtures):
                 )
 
     def test_equivalent_relation_spellings_preserve_pair_identity(self) -> None:
-        self.make_v04(
+        self.make_current(
             self.baseline,
             self.pair_files("old default", "unchanged api"),
         )
@@ -508,7 +683,7 @@ class BodyPairChangesCase(CommandFixtures):
             .replace("impl [default]:", "impl [mod.default]:")
             .replace("impl [api]:", "impl [mod.api]:")
         )
-        self.make_v04(self.current, current_files)
+        self.make_current(self.current, current_files)
         for package in (self.baseline, self.current):
             checked = self.run_command("check_package.py", package)
             self.assertEqual(0, checked.returncode, checked.stdout + checked.stderr)
@@ -531,7 +706,7 @@ class BodyPairChangesCase(CommandFixtures):
                     run    same statements
                 ```
                 """
-            self.make_v04(root, files)
+            self.make_current(root, files)
             checked = self.run_command("check_package.py", root)
             self.assertEqual(0, checked.returncode, checked.stdout + checked.stderr)
         result = self.run_command("ref_sites.py", self.baseline, self.current)
@@ -557,8 +732,8 @@ class BodyPairChangesCase(CommandFixtures):
                         )
                     }
 
-                self.make_v04(self.baseline, files(old))
-                self.make_v04(self.current, files(new))
+                self.make_current(self.baseline, files(old))
+                self.make_current(self.current, files(new))
                 result = self.run_command("ref_sites.py", self.baseline, self.current)
                 self.assertEqual(0, result.returncode, result.stderr)
                 self.assertEqual(
@@ -587,7 +762,7 @@ class NamedRootFacadeCase(CommandFixtures):
                 ```
                 """,
         }
-        self.make_v04(
+        self.make_current(
             self.baseline,
             {
                 "api.h.md": "## Structure\n```\n  thing    old\n```\n",
@@ -595,7 +770,7 @@ class NamedRootFacadeCase(CommandFixtures):
             },
             modules=("consumer",),
         )
-        self.make_v04(
+        self.make_current(
             self.current,
             {
                 "api.h.md": "## Structure\n```\n  thing    new\n```\n",
@@ -626,7 +801,7 @@ class NamedRootFacadeCase(CommandFixtures):
                 Consumer.
                 """,
         }
-        self.make_v04(
+        self.make_current(
             self.baseline,
             {
                 "part/api.h.md": "## Structure\n```\n  thing    old\n```\n",
@@ -634,7 +809,7 @@ class NamedRootFacadeCase(CommandFixtures):
             },
             modules=("part", "consumer"),
         )
-        self.make_v04(
+        self.make_current(
             self.current,
             {
                 "part/api.h.md": "## Structure\n```\n  thing    new\n```\n",

@@ -1,7 +1,7 @@
 +++
 "module lead" = true
 +++
-The language definition's design ontology, with this interface its [structural kernel]: [unit] authority, [module tree]s, [interface]s and [body]s, [item]s and [decision]s, [reference]s, [sight], implementation and change closure.
+The language definition's design ontology, with this [interface] its [structural kernel]: [unit] authority, [module tree]s, [interface]s and [body]s, [item]s and [decision]s, [reference]s, [sight], implementation and change closure.
 
 ## Structure
 
@@ -106,9 +106,9 @@ The language definition's design ontology, with this interface its [structural k
                           contextual shortest unambiguous forms and [sight] authorizing a reference
                           rather than selecting its target
   uses                    the [interface]s, other than those it provides, that a [module]'s
-                          [reference]s land on, or on an [item] of: what a [module] [uses], read off
-                          its [reference]s alone, so that one whose [reference]s land in none stands
-                          alone
+                          [reference]s land on through its [sight], or on an [item] of: what a
+                          [module] [uses], read off its [reference]s and [sight] alone, so that one
+                          whose [reference]s land in none through [sight] stands alone
 ```
 
 ## Rules

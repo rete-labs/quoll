@@ -1,8 +1,6 @@
-"""Temporary structured checks for Quoll v0.4 packages.
+"""Structured and semantic checks for current Quoll 0.6.0 packages.
 
-This module deliberately stops at source discovery, structured validation, and
-portable content hashing.  Reference resolution and semantic checks build on
-these data classes elsewhere.
+Baselines are same-edition trees used only for diff and decision-lifetime checks.
 """
 
 from __future__ import annotations
@@ -16,6 +14,20 @@ import re
 import stat
 import tomllib
 from typing import Iterable, Iterator
+
+
+CURRENT_EDITION = "0.6.0"
+LANGUAGE_PACKAGE_ID = "pkg:quoll/rete-labs.ru/quoll/language"
+EDITION_FINDING_RULES = {"manifest.edition", "workspace.edition"}
+EDITION_PRELUDE = {
+    "workspace": "model.graph.workspace",
+    "package": "model.graph.package",
+    "module": "model.kernel.module",
+    "interface": "model.kernel.interface",
+    "item": "model.kernel.item",
+    "decision": "model.kernel.decision",
+    "uses": "model.kernel.uses",
+}
 
 
 @dataclass(frozen=True, order=True)
@@ -532,7 +544,7 @@ def _front_mapping_line(source: SourceFile, key: str) -> int:
 def _validate_front(package: Package, source: SourceFile) -> None:
     if not source.front:
         return
-    allowed = {"aliases"}
+    allowed = {"aliases", "use", "prelude"}
     if source.kind == "body":
         allowed.add("implements")
     elif source.kind in {"header", "private header"}:
@@ -548,6 +560,55 @@ def _validate_front(package: Package, source: SourceFile) -> None:
             package._parse_findings.append(
                 Finding("front.type", "error", source.path, key, "value must be a list of names")
             )
+        elif key == "prelude":
+            if not isinstance(value, list) or any(not isinstance(name, str) for name in value):
+                package._parse_findings.append(
+                    Finding("front.type", "error", source.path, key, "value must be a TOML string array")
+                )
+                continue
+            seen: set[str] = set()
+            for name in value:
+                if name not in EDITION_PRELUDE:
+                    package._parse_findings.append(
+                        Finding("front.prelude", "error", source.path, name, "unknown edition prelude alias")
+                    )
+                if name in seen:
+                    package._parse_findings.append(
+                        Finding("front.prelude", "error", source.path, name, "duplicate edition prelude alias")
+                    )
+                seen.add(name)
+        elif key == "use":
+            if not isinstance(value, dict):
+                package._parse_findings.append(
+                    Finding("front.type", "error", source.path, key, "value must be a table of string arrays")
+                )
+                continue
+            for prefix, continuations in value.items():
+                if not _valid_exposure_spelling(prefix):
+                    package._parse_findings.append(
+                        Finding("front.use", "error", source.path, str(prefix), "use prefix is not a nonempty abstract reference")
+                    )
+                if not isinstance(continuations, list) or any(
+                    not isinstance(continuation, str) for continuation in continuations
+                ):
+                    package._parse_findings.append(
+                        Finding("front.type", "error", source.path, str(prefix), "use value must be a TOML string array")
+                    )
+                    continue
+                seen_continuations: set[str] = set()
+                for continuation in continuations:
+                    if (
+                        not _valid_exposure_spelling(continuation)
+                        or continuation.startswith("pkg:")
+                    ):
+                        package._parse_findings.append(
+                            Finding("front.use", "error", source.path, continuation, "use continuation is not a nonempty relative reference")
+                        )
+                    if continuation in seen_continuations:
+                        package._parse_findings.append(
+                            Finding("front.use", "error", source.path, continuation, "duplicate use continuation")
+                        )
+                    seen_continuations.add(continuation)
         elif key == "exposes":
             if not isinstance(value, dict):
                 package._parse_findings.append(
@@ -1147,21 +1208,53 @@ def _validate_lock(package: Package, findings: list[Finding]) -> None:
                     _error(findings, "lock.tag", path, f"{source_subject}.tag", f"release tag must be {expected_tag}")
 
 
+def _validate_workspace(package: Package, findings: list[Finding]) -> None:
+    path = "workspace.quoll.toml"
+    data = package.workspace
+    if data is None:
+        return
+    _exact_keys(findings, data, {"packages", "edition", "description"}, path, "workspace")
+    if "description" in data and not isinstance(data["description"], str):
+        _error(findings, "workspace.type", path, "description", "value must be a string")
+    edition = data.get("edition")
+    if "edition" in data and not isinstance(edition, str):
+        _error(findings, "workspace.type", path, "edition", "value must be a string")
+    if edition != CURRENT_EDITION:
+        _error(findings, "workspace.edition", path, "edition", "every current and baseline workspace requires exactly 0.6.0")
+    packages = data.get("packages")
+    if not _string_list(packages):
+        _error(findings, "workspace.type", path, "packages", "value must be a list of workspace-relative paths")
+        return
+    seen: set[str] = set()
+    for index, member in enumerate(packages):
+        subject = f"packages[{index}]"
+        if not _valid_module_path(member):
+            _error(findings, "workspace.path", path, subject, "member path must be canonical and workspace-relative")
+        if member in seen:
+            _error(findings, "workspace.duplicate", path, subject, "member path is listed more than once")
+        seen.add(member)
+
+
 def validate_structured(package: Package) -> list[Finding]:
     """Return all structured findings for an already discovered package."""
 
     findings = list(package._parse_findings)
+    if package.manifest is None and package.workspace is not None:
+        _validate_workspace(package, findings)
+        return _sorted_findings(findings)
     for filename, rule in (
         ("package.quoll.toml", "manifest.required"),
         ("modules.quoll.toml", "modules.required"),
         ("package.lock.quoll.toml", "lock.required"),
     ):
         if not (package.root / filename).is_file():
-            _error(findings, rule, filename, filename, "required v0.4 file is missing")
+            _error(findings, rule, filename, filename, "required package file is missing")
     _validate_manifest(package, findings)
     _validate_membership(package, findings)
     _validate_lock(package, findings)
-    return sorted(findings)
+    if package.workspace is not None:
+        _validate_workspace(package, findings)
+    return _sorted_findings(findings)
 
 
 def _load_related_decisions(package: Package) -> None:
@@ -1187,6 +1280,17 @@ def _load_related_decisions(package: Package) -> None:
             for member in members
         ):
             continue
+        if workspace.get("edition") != CURRENT_EDITION:
+            package._parse_findings.append(
+                Finding(
+                    "workspace.edition",
+                    "error",
+                    str(manifest_path),
+                    "edition",
+                    "related workspace decisions require workspace edition 0.6.0 before front parsing",
+                )
+            )
+            return
         decision_path = ancestor / "workspace.decisions.md"
         try:
             text = decision_path.read_text(encoding="utf-8")
@@ -1196,35 +1300,67 @@ def _load_related_decisions(package: Package) -> None:
             path=str(decision_path),
             kind="workspace decisions",
             text=text,
-            content=text,
             module="<workspace>",
         )
-        _parse_decisions(source, text.splitlines(keepends=True))
+        lines = _parse_front(package, source, text.splitlines(keepends=True))
+        _validate_front(package, source)
+        source.content = "".join(lines)
+        _parse_decisions(source, lines)
         package.related_decisions.append(
             (Module(path="<workspace>", name="workspace", files=[source]), source)
         )
         return
 
 
+def _edition_role_valid(package: Package, baseline: bool, workspace_only: bool) -> bool:
+    """Validate the package or workspace edition before source/front discovery."""
+
+    data = package.workspace if workspace_only else package.manifest
+    edition = data.get("edition") if data else None
+    if edition == CURRENT_EDITION:
+        return True
+    path = "workspace.quoll.toml" if workspace_only else "package.quoll.toml"
+    rule = "workspace.edition" if workspace_only else "manifest.edition"
+    role = "baseline" if baseline else "current"
+    if not isinstance(edition, str):
+        detail = f"a quoted edition 0.6.0 is required for every {role} package or workspace"
+    elif not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", edition):
+        detail = f"edition is malformed; every {role} package or workspace requires exactly 0.6.0"
+    else:
+        detail = f"unsupported {role} edition {edition}; only 0.6.0 is supported"
+    package._parse_findings.append(
+        Finding(rule, "error", path, "edition", detail)
+    )
+    return False
+
+
 def load_package(root: str | os.PathLike[str], baseline: bool = False) -> Package:
-    """Discover and structurally validate a current or earlier v0.4 package."""
+    """Discover a current 0.6.0 package or an explicit verification baseline."""
 
     root_path = Path(root)
     package = Package(root=root_path, name=root_path.name)
     package.manifest = _read_toml(package, "package.quoll.toml")
-    package.membership = _read_toml(package, "modules.quoll.toml")
     package.workspace = _read_toml(package, "workspace.quoll.toml")
-    package.lock = _read_toml(package, "package.lock.quoll.toml")
+    workspace_only = package.manifest is None and (root_path / "workspace.quoll.toml").is_file()
     if package.manifest and isinstance(package.manifest.get("id"), str):
         package.id = package.manifest["id"]
-        try:
-            package.name = package.id.rsplit("/", 1)[-1]
-        except IndexError:
-            pass
-    if package.workspace and isinstance(package.workspace.get("packages"), list):
+        package.name = package.id.rsplit("/", 1)[-1]
+    if package.manifest and isinstance(package.manifest.get("edition"), str):
+        package.edition = package.manifest["edition"]
+    elif workspace_only and package.workspace and isinstance(package.workspace.get("edition"), str):
+        package.edition = package.workspace["edition"]
+    if not _edition_role_valid(package, baseline, workspace_only):
+        package.findings = validate_structured(package)
+        return package
+
+    package.membership = _read_toml(package, "modules.quoll.toml")
+    package.lock = _read_toml(package, "package.lock.quoll.toml")
+    if workspace_only and package.workspace and isinstance(package.workspace.get("packages"), list):
         for member_path in package.workspace["packages"]:
             if isinstance(member_path, str) and _valid_module_path(member_path):
-                package.workspace_members.append(load_package(root_path / member_path))
+                package.workspace_members.append(
+                    load_package(root_path / member_path, baseline=baseline)
+                )
     members: list[str] = []
     if package.membership and isinstance(package.membership.get("modules"), list):
         members = [
@@ -1233,7 +1369,8 @@ def load_package(root: str | os.PathLike[str], baseline: bool = False) -> Packag
             if isinstance(path, str) and _valid_module_path(path)
         ]
     _discover_modules(package, list(dict.fromkeys(members)), baseline=baseline)
-    _load_related_decisions(package)
+    if not workspace_only:
+        _load_related_decisions(package)
     package.findings = validate_structured(package)
     return package
 
@@ -1385,6 +1522,7 @@ class _SemanticResolution:
     targets: list[_SemanticTarget] = field(default_factory=list)
     status: str = "ok"
     detail: str = ""
+    edition: bool = False
 
 
 @dataclass
@@ -1394,6 +1532,8 @@ class _SemanticAlias:
     source: SourceFile
     purl: bool
     selectors: list[Selector] = field(default_factory=list)
+    derived: bool = False
+    prelude: bool = False
 
 
 @dataclass(eq=False)
@@ -1419,7 +1559,7 @@ class _SemanticExposure:
 
 @dataclass(frozen=True)
 class PublicUnit:
-    """One identified canonical source file needed by an external reader."""
+    """One self-contained canonical source file needed by an external reader."""
 
     identity: str
     path: str
@@ -1427,6 +1567,8 @@ class PublicUnit:
     package_id: str
     dependencies: tuple[str, ...] = ()
     exposures: tuple[str, ...] = ()
+    edition: str = CURRENT_EDITION
+    text: str = ""
 
 
 @dataclass(frozen=True)
@@ -1458,7 +1600,6 @@ class PublicReading:
 
 
 _SEMANTIC_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
-_MODEL_CORE_WORDS = {"workspace", "package", "module", "interface", "item", "decision"}
 
 
 def _semantic_stem(source: SourceFile) -> str:
@@ -1675,11 +1816,48 @@ class _SemanticResolver:
         self.owner = owner
         raw_aliases = source.front.get("aliases", {})
         self.aliases: dict[str, _SemanticAlias] = {}
+        self.alias_declarations: list[_SemanticAlias] = []
+        self.prelude_names: set[str] = set()
+        if self.model.package.edition == CURRENT_EDITION:
+            selected = source.front.get("prelude", list(EDITION_PRELUDE))
+            if isinstance(selected, list):
+                self.prelude_names = {
+                    name for name in selected if isinstance(name, str) and name in EDITION_PRELUDE
+                }
+            for name in sorted(self.prelude_names):
+                self.aliases[name] = _SemanticAlias(
+                    name, EDITION_PRELUDE[name], source, False, prelude=True
+                )
+        declarations: list[_SemanticAlias] = []
         if isinstance(raw_aliases, dict):
             for name, value in raw_aliases.items():
                 if isinstance(name, str) and isinstance(value, str):
                     purl = value.startswith("pkg:") and context != "workspace decision"
-                    self.aliases[name] = _SemanticAlias(name, value, source, purl)
+                    declarations.append(_SemanticAlias(name, value, source, purl))
+        raw_use = source.front.get("use", {})
+        if isinstance(raw_use, dict):
+            for prefix, continuations in raw_use.items():
+                if not isinstance(prefix, str) or not isinstance(continuations, list):
+                    continue
+                for continuation in continuations:
+                    if not isinstance(continuation, str) or not continuation:
+                        continue
+                    local = continuation.rsplit(".", 1)[-1]
+                    declarations.append(
+                        _SemanticAlias(
+                            local,
+                            f"{prefix}.{continuation}",
+                            source,
+                            False,
+                            derived=True,
+                        )
+                    )
+        self.alias_declarations = declarations
+        for alias in declarations:
+            # An included edition spelling stays reserved even when a collision
+            # is also diagnosed; duplicate user declarations are never order-dependent.
+            if alias.name not in self.aliases:
+                self.aliases[alias.name] = alias
 
     def _reference_parts(self, reference: str) -> list[str]:
         if self.context == "workspace decision" and reference.startswith("pkg:quoll/"):
@@ -1764,7 +1942,7 @@ class _SemanticResolver:
                 return base
             if len(base.targets) != 1:
                 return _SemanticResolution(status="ambiguous", detail="alias does not identify one target")
-            return self._continue(base.targets[0], parts[1:])
+            return self._continue(base.targets[0], parts[1:], edition=base.edition)
         candidates = self._first_candidates(parts, include_implemented, allow_parent)
         visible = [target for target in candidates if self._visible(target, include_implemented, allow_parent)]
         if candidates and not visible:
@@ -2020,9 +2198,15 @@ class _SemanticResolver:
             if ancestor in self.model.modules
         )
 
-    def _continue(self, target: _SemanticTarget, rest: list[str]) -> _SemanticResolution:
+    def _continue(
+        self,
+        target: _SemanticTarget,
+        rest: list[str],
+        *,
+        edition: bool = False,
+    ) -> _SemanticResolution:
         if not rest:
-            return _SemanticResolution([target])
+            return _SemanticResolution([target], edition=edition)
         if target.kind == "module":
             return self._module_continuation(target, rest, dependency=target.external)
         if target.kind == "dependency":
@@ -2043,8 +2227,8 @@ class _SemanticResolver:
             if len(matches) > 1:
                 return _SemanticResolution(status="ambiguous", detail="included interfaces give this item more than one meaning")
             return _SemanticResolution(matches)
-        if target.kind in {"item", "body-item", "decision"}:
-            return _SemanticResolution(status="form", detail="no segment may follow this target")
+        if target.kind in {"item", "body-item", "decision", "edition-item"}:
+            return _SemanticResolution(status="form", detail="no segment may follow this target", edition=edition)
         return _SemanticResolution(status="unresolved", detail="target cannot be continued")
 
     def _module_continuation(
@@ -2142,10 +2326,48 @@ class _SemanticResolver:
         external = _SemanticTarget("module", supplied, root.name, module=root, external=True)
         return self._module_continuation(external, rest, dependency=True)
 
+    def _resolve_prelude_alias(self, alias: _SemanticAlias) -> _SemanticResolution:
+        interface_name = "graph" if alias.name in {"workspace", "package"} else "kernel"
+
+        def canonical(model: _SemanticModel) -> list[_SemanticTarget]:
+            return [
+                model.item_target(interface, item)
+                for interface in model.interfaces
+                if interface.module.path == "model" and interface.name == interface_name
+                for item in interface.source.items
+                if item.name == alias.name
+            ]
+
+        local = (
+            _semantic_unique(canonical(self.model))
+            if self.model.package.id == LANGUAGE_PACKAGE_ID
+            else []
+        )
+        if len(local) == 1:
+            return _SemanticResolution(local, edition=True)
+        if len(local) > 1:
+            return _SemanticResolution(status="ambiguous", detail="edition alias has multiple local target items")
+        foreign = _semantic_unique(
+            target
+            for model in self.checker.models.values()
+            if model is not self.model and model.package.id == LANGUAGE_PACKAGE_ID
+            for target in canonical(model)
+        )
+        if len(foreign) == 1:
+            return _SemanticResolution(foreign, edition=True)
+        if len(foreign) > 1:
+            return _SemanticResolution(status="ambiguous", detail="edition alias has multiple target items")
+        return _SemanticResolution(
+            [_SemanticTarget("edition-item", self.model.package, alias.name, external=True)],
+            edition=True,
+        )
+
     def _resolve_alias(self, name: str, stack: tuple[str, ...]) -> _SemanticResolution:
         alias = self.aliases[name]
         if name in stack:
             return _SemanticResolution(status="alias-cycle", detail=" -> ".join((*stack, name)))
+        if alias.prelude:
+            return self._resolve_prelude_alias(alias)
         if alias.purl:
             selectors = self.checker.alias_selectors(alias)
             alias.selectors = selectors
@@ -2160,11 +2382,11 @@ class _SemanticResolver:
         if base.status != "ok":
             return base
         if self.context == "workspace decision":
-            allowed = {"member", "module", "interface", "item"}
+            allowed = {"member", "module", "interface", "item", "edition-item"}
         elif self.context == "interface":
-            allowed = {"module", "interface", "item"}
+            allowed = {"module", "interface", "item", "edition-item"}
         else:
-            allowed = {"module", "interface", "item", "body-item"}
+            allowed = {"module", "interface", "item", "body-item", "edition-item"}
         if len(base.targets) != 1 or base.targets[0].kind not in allowed:
             return _SemanticResolution(status="form", detail="qualified alias must name one visible module, interface or item")
         return base
@@ -2215,6 +2437,7 @@ class _SemanticChecker:
             self.models[id(member)] = prepared.model
         self.findings: list[Finding] = []
         self.resolved_sites: list[tuple[_SemanticSite, _SemanticResolution]] = []
+        self.unavailable_sites: list[tuple[_SemanticSite, _SemanticResolution]] = []
         self.include_targets: dict[
             tuple[_SemanticInterface, _SemanticInterface], _SemanticTarget
         ] = {}
@@ -2576,16 +2799,29 @@ class _SemanticChecker:
 
     def _check_aliases(self) -> None:
         for source in self.package.files:
-            if not isinstance(source.front.get("aliases"), dict):
+            if source.kind not in {"header", "private header", "body", "decisions", "workspace decisions"}:
                 continue
             module = self.package.module_map[source.module]
             resolver = self.resolver_for(source, module)
+            declarations = resolver.alias_declarations
+            if not declarations:
+                continue
             local_names = self._local_names(resolver)
-            for alias in resolver.aliases.values():
-                if not _SEMANTIC_IDENTIFIER.fullmatch(alias.name):
-                    self.error("semantic.alias-unique", source, alias.name, "alias is not a lowercase ASCII identifier")
+            counts = {
+                name: sum(alias.name == name for alias in declarations)
+                for name in {alias.name for alias in declarations}
+            }
+            for alias in declarations:
+                if not alias.derived and not _SEMANTIC_IDENTIFIER.fullmatch(alias.name):
+                    self.error("semantic.alias-unique", source, alias.name, "rename alias is not a lowercase ASCII identifier")
+                if counts[alias.name] > 1:
+                    self.error("semantic.alias-unique", source, alias.name, "explicit and derived aliases declare the same local name more than once")
+                if alias.name in resolver.prelude_names:
+                    self.error("semantic.alias-unique", source, alias.name, "alias collides with an included edition prelude spelling")
                 if alias.name in local_names:
                     self.error("semantic.alias-unique", source, alias.name, "alias collides with a visible dependency or local reference name")
+                if resolver.aliases.get(alias.name) is not alias:
+                    continue
                 resolution = resolver._resolve_alias(alias.name, ())
                 if resolution.status == "alias-cycle":
                     path = resolution.detail.split(" -> ")
@@ -2726,6 +2962,8 @@ class _SemanticChecker:
             if resolution.status == "wrong-dependency":
                 self.error("semantic.dependency", site.source, site.reference, resolution.detail, site.line)
                 continue
+            if resolution.status == "unavailable":
+                self.unavailable_sites.append((site, resolution))
             if resolution.status != "ok":
                 continue
             self.resolved_sites.append((site, resolution))
@@ -2753,20 +2991,12 @@ class _SemanticChecker:
                 return True
         return False
 
-    @staticmethod
-    def _decision_item_references(text: str) -> tuple[list[tuple[str, bool]], str]:
-        """Return bracketed and edition-owned bare references and their join shape."""
+    def _decision_item_references(self, text: str) -> tuple[list[tuple[str, bool]], str]:
+        """Return bracketed item references and their joining punctuation."""
 
         references = [(reference, False) for reference in extract_refs(text)]
         shape = re.sub(r"\[[^\[\]\n]+\](?!\()", "\x00", text.strip())
-        core_words = "|".join(re.escape(word) for word in sorted(_MODEL_CORE_WORDS))
-        bare_pattern = re.compile(rf"(?<![\w-])(?:{core_words})(?![\w-])")
-
-        def replace_bare(match: re.Match[str]) -> str:
-            references.append((match.group(0), True))
-            return "\x00"
-
-        return references, bare_pattern.sub(replace_bare, shape)
+        return references, shape
 
     def _resolve_decision_reference(
         self,
@@ -2775,35 +3005,6 @@ class _SemanticChecker:
         *,
         bare: bool,
     ) -> _SemanticResolution:
-        """Resolve a bare core word to its edition item, not a local lookalike."""
-
-        if bare and reference in _MODEL_CORE_WORDS:
-            interface_name = "graph" if reference in {"workspace", "package"} else "kernel"
-
-            def canonical(model: _SemanticModel) -> list[_SemanticTarget]:
-                return [
-                    model.item_target(interface, item)
-                    for interface in model.interfaces
-                    if interface.module.name == "model" and interface.name == interface_name
-                    for item in interface.source.items
-                    if item.name == reference
-                ]
-
-            local = _semantic_unique(canonical(self.model))
-            if len(local) == 1:
-                return _SemanticResolution(local)
-            if len(local) > 1:
-                return _SemanticResolution(status="ambiguous", detail="core word has multiple edition items")
-            foreign = _semantic_unique(
-                target
-                for model in self.models.values()
-                if model is not self.model and model.package.name == "language"
-                for target in canonical(model)
-            )
-            if len(foreign) == 1:
-                return _SemanticResolution(foreign)
-            if len(foreign) > 1:
-                return _SemanticResolution(status="ambiguous", detail="core word has multiple edition items")
         return resolver.resolve(reference)
 
     def _check_decision_statements(self) -> None:
@@ -2843,7 +3044,7 @@ class _SemanticChecker:
                             resolver, reference, bare=bare
                         )
                         if resolution.status != "ok" or not any(
-                            target.kind in {"item", "body-item"}
+                            target.kind in {"item", "body-item", "edition-item"}
                             for target in resolution.targets
                         ):
                             self.error(
@@ -2931,6 +3132,8 @@ class _SemanticChecker:
 
     def _compute_uses(self) -> None:
         for site, resolution in self.resolved_sites:
+            if resolution.edition:
+                continue
             for target in resolution.targets:
                 interface = target.interface if target.kind in {"interface", "item"} else None
                 if interface is None or interface.package is not self.package:
@@ -3031,8 +3234,9 @@ class _SemanticChecker:
             return
         declarations: dict[str, tuple[Item, set[str]]] = {}
         ambiguous: set[str] = set()
+        resolver = self.resolver_for(root.body, root)
         for item in root.body.items:
-            parsed = self._parse_complete_use(item)
+            parsed = self._parse_complete_use(item, resolver)
             if parsed is None:
                 continue
             subject, expected = parsed
@@ -3057,12 +3261,39 @@ class _SemanticChecker:
                     details.append("undeclared " + ", ".join(unexpected))
                 self.error("semantic.uses", root.body, subject or self.package.name, "; ".join(details) or "use declaration differs from resolved references", item.line)
 
-    def _parse_complete_use(self, item: Item) -> tuple[str, set[str]] | None:
+    @staticmethod
+    def _edition_contract_item(target: _SemanticTarget, name: str) -> bool:
+        if target.kind == "edition-item":
+            return target.name == name
+        return (
+            target.kind == "item"
+            and target.item is not None
+            and target.item.name == name
+            and target.interface is not None
+            and target.interface.module.name == "model"
+        )
+
+    def _contract_reference(
+        self, resolver: _SemanticResolver, reference: str, name: str
+    ) -> bool:
+        resolution = resolver.resolve(reference)
+        return resolution.status == "ok" and any(
+            self._edition_contract_item(target, name) for target in resolution.targets
+        )
+
+    def _parse_complete_use(
+        self, item: Item, resolver: _SemanticResolver
+    ) -> tuple[str, set[str]] | None:
         text = item.statements.strip()
         references = extract_refs(text)
-        if references.count("model.uses") != 1:
+        uses_indices = [
+            index
+            for index, reference in enumerate(references)
+            if self._contract_reference(resolver, reference, "uses")
+        ]
+        if len(uses_indices) != 1:
             return None
-        uses_index = references.index("model.uses")
+        uses_index = uses_indices[0]
         if uses_index < 1 or not references[uses_index - 1].endswith(".default"):
             return None
         subject_name = references[uses_index - 1][: -len(".default")]
@@ -3070,14 +3301,15 @@ class _SemanticChecker:
         if subject is None:
             return None
         trailing = references[uses_index + 1 :]
-        if trailing == ["model.interface"]:
-            if not re.search(r"\bno\s+\[model\.interface\]", text):
+        if len(trailing) == 1 and self._contract_reference(resolver, trailing[0], "interface"):
+            if not re.search(rf"\bno\s+\[{re.escape(trailing[0])}\]", text):
                 return None
             return subject, set()
         if (
             not text.endswith("alone")
             or len(trailing) < 3
-            or trailing[:2] != ["model.interface", "model.module"]
+            or not self._contract_reference(resolver, trailing[0], "interface")
+            or not self._contract_reference(resolver, trailing[1], "module")
         ):
             return None
         expected_names = [reference[: -len(".default")] for reference in trailing[2:] if reference.endswith(".default")]
@@ -3148,6 +3380,8 @@ class _SemanticChecker:
         return available
 
     def _target_available(self, target: _SemanticTarget, available: set[tuple]) -> bool:
+        if target.kind == "edition-item":
+            return True
         if target.kind == "dependency":
             return target.dependency in self.package.dependencies
         if target.kind == "member":
@@ -3390,6 +3624,8 @@ class _SemanticChecker:
                     continue
                 key = (site.source.path, site.line, site.reference)
                 selected[key] = (site, resolution)
+                if resolution.edition:
+                    continue
                 for target in resolution.targets:
                     if not self._target_available(target, available):
                         continue
@@ -3420,6 +3656,8 @@ class _SemanticChecker:
                         if exposure.source.path == path
                     )
                 ),
+                edition=self.package.edition,
+                text=sources[path].text,
             )
             for path in sources
         ]
@@ -3452,6 +3690,8 @@ class _SemanticChecker:
         selected, self.public_reading = self._compute_public_closure()
         available = self._available_public_targets(self.model)
         for site, resolution in selected.values():
+            if resolution.edition:
+                continue
             if all(self._target_available(target, available) for target in resolution.targets):
                 continue
             self.error(
@@ -3499,9 +3739,157 @@ def public_reading(
 ) -> PublicReading:
     """Collect identified canonical public units and public dependency metadata."""
 
-    checker = _SemanticChecker(package, dependency_packages)
+    supplied = tuple(dependency_packages)
+    unsupported = [candidate for candidate in (package, *supplied) if candidate.edition != CURRENT_EDITION]
+    if unsupported:
+        raise ValueError("public reading requires current edition 0.6.0 for every supplied package")
+    checker = _SemanticChecker(package, supplied)
     checker.run()
     return checker.public_reading
+
+
+@dataclass(frozen=True, order=True)
+class ResolvedTargetSite:
+    """One mechanically resolved dependent site and its stable target identity."""
+
+    target: str
+    path: str
+    line: int
+    reference: str
+    context: str
+
+
+@dataclass(frozen=True)
+class DependentSiteEvidence:
+    sites: tuple[ResolvedTargetSite, ...]
+    complete: bool
+    limits: tuple[str, ...] = ()
+
+
+def _resolved_target_identity(target: _SemanticTarget) -> str:
+    if target.kind == "edition-item":
+        return f"edition:{CURRENT_EDITION}:{EDITION_PRELUDE[target.name]}"
+    package = target.package.id or target.package.name
+    if target.kind == "item" and target.interface is not None and target.item is not None:
+        return f"{package}:item:{target.interface.module.path}:{target.interface.name}:{target.item.name}"
+    if target.kind == "interface" and target.interface is not None:
+        return f"{package}:interface:{target.interface.module.path}:{target.interface.name}"
+    if target.kind == "module" and target.module is not None:
+        return f"{package}:module:{target.module.path}"
+    if target.kind == "member":
+        return f"{package}:package:"
+    if target.kind == "dependency" and target.dependency is not None:
+        return f"{package}:dependency:{target.dependency.raw}"
+    if target.kind == "body-item" and target.module is not None and target.item is not None:
+        return f"{package}:body-item:{target.module.path}:{target.item.name}"
+    if target.kind == "decision" and target.module is not None and target.decision is not None:
+        return f"{package}:decision:{target.module.path}:{target.decision.id}"
+    return f"{package}:{target.kind}:{target.name}"
+
+
+def dependent_site_evidence(
+    package: Package,
+    dependency_packages: Iterable[Package] = (),
+) -> DependentSiteEvidence:
+    """Return resolved prose and relation sites; textual search remains supplemental."""
+
+    checker = _SemanticChecker(package, dependency_packages)
+    findings = checker.run()
+    records: list[ResolvedTargetSite] = []
+    limits: list[str] = []
+
+    def add(site: _SemanticSite, resolution: _SemanticResolution) -> None:
+        if resolution.status == "unavailable":
+            limits.append(
+                f"unavailable dependency surface omits {site.context} site {site.source.path}:{site.reference}"
+            )
+            return
+        if resolution.status != "ok":
+            return
+        for target in resolution.targets:
+            records.append(
+                ResolvedTargetSite(
+                    _resolved_target_identity(target),
+                    site.source.path,
+                    site.line,
+                    site.reference,
+                    site.context,
+                )
+            )
+
+    for site, resolution in checker.resolved_sites:
+        add(site, resolution)
+    for site, resolution in checker.unavailable_sites:
+        add(site, resolution)
+    for module in package.modules:
+        body = module.body
+        if body is not None:
+            resolver = checker.resolver_for(body, module)
+            for reference in body.front.get("implements", []):
+                if isinstance(reference, str):
+                    add(
+                        _SemanticSite(body, module, reference, 1, "implements"),
+                        resolver.resolve(reference, include_implemented=False, allow_parent=True, relation=True),
+                    )
+            for item in body.items:
+                if item.impl is not None:
+                    add(
+                        _SemanticSite(body, module, item.impl, item.line, "impl"),
+                        resolver.resolve(item.impl, relation=True),
+                    )
+        for source in module.files:
+            owner = checker.model.by_source.get(source.path)
+            if owner is not None:
+                resolver = checker.resolver_for(source, module)
+                for reference in source.front.get("includes", []):
+                    if isinstance(reference, str):
+                        add(
+                            _SemanticSite(source, module, reference, 1, "includes"),
+                            resolver.resolve(reference, relation=True),
+                        )
+    for module in package.modules:
+        for source in module.files:
+            if source.kind not in {"header", "private header", "body", "decisions", "workspace decisions"}:
+                continue
+            resolver = checker.resolver_for(source, module)
+            for alias in resolver.alias_declarations:
+                resolution = resolver._resolve_alias(alias.name, ())
+                if resolution.status == "unavailable":
+                    limits.append(
+                        f"unavailable dependency surface omits binding {source.path}:{alias.name}"
+                    )
+    for exposure in checker.model.exposures:
+        resolution = checker._resolve_exposure(exposure)
+        add(
+            _SemanticSite(exposure.source, exposure.module, exposure.value, exposure.line, "exposes"),
+            resolution,
+        )
+
+    if package.related_decisions and package.workspace is None:
+        limits.append("related workspace decisions require evidence collection from the workspace root")
+    if any(finding.rule.startswith("front.") for finding in package.findings):
+        limits.append("malformed or absent front bindings may omit dependent sites")
+    incomplete_rules = {
+        "semantic.resolved",
+        "semantic.ambiguous",
+        "semantic.sight",
+        "semantic.reference-form",
+        "semantic.alias-target",
+        "semantic.alias-ambiguous",
+        "semantic.alias-cycle",
+        "semantic.exposure-target",
+        "semantic.exposure-cycle",
+        "semantic.implementable",
+        "semantic.includable",
+        "semantic.relations",
+    }
+    if any(finding.rule in incomplete_rules for finding in findings):
+        limits.append("sites with unresolved or invalid references are absent from mechanical evidence")
+    return DependentSiteEvidence(
+        sites=tuple(sorted(set(records))),
+        complete=not limits,
+        limits=tuple(dict.fromkeys(limits)),
+    )
 
 
 @dataclass(frozen=True)
@@ -3901,7 +4289,12 @@ def _stated_by_decisions(
         resolver = checker.resolver_for(location.source, location.module)
         references, _shape = checker._decision_item_references(stated_by)
         for reference, bare in references:
-            if not bare and "." not in reference and location.module.path != item_location.module.path:
+            if (
+                not bare
+                and "." not in reference
+                and reference not in resolver.aliases
+                and location.module.path != item_location.module.path
+            ):
                 continue
             resolution = checker._resolve_decision_reference(
                 resolver, reference, bare=bare
@@ -4192,10 +4585,11 @@ def _bare_candidates(package: Package, review: bool) -> list[Finding]:
         model = checker.models[id(member)]
         names.update(target.name for target in model.public_items())
     compounds = [name for name in names if re.split(r"[ -]+", name.strip()) and len(re.split(r"[ -]+", name.strip())) > 1]
+    excluded_words = _PROSE_CORE_WORDS
     singles = [
         name
         for name in names
-        if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) and name.casefold() not in _PROSE_CORE_WORDS | _MODEL_CORE_WORDS
+        if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) and name.casefold() not in excluded_words
     ]
     findings: list[Finding] = []
     for source in package.files:
@@ -4326,21 +4720,62 @@ def check_package(
     )
     current = [
         *structured_findings(package),
+        *(
+            replace(finding, package_id=dependency.id)
+            for dependency in dependencies
+            for finding in structured_findings(dependency)
+        ),
         *semantic_findings(package, dependencies),
         *prose_findings(package, baseline=baseline, review=review),
     ]
     if baseline is not None:
         committed = [
             *structured_findings(baseline),
+            *(
+                replace(finding, package_id=dependency.id)
+                for dependency in baseline_dependencies
+                for finding in structured_findings(dependency)
+            ),
             *semantic_findings(baseline, baseline_dependencies),
             *prose_findings(baseline, review=review),
         ]
         committed_keys = {finding.key for finding in committed}
-        current = [finding for finding in current if finding.key not in committed_keys]
+        current = [
+            finding
+            for finding in current
+            if finding.rule in EDITION_FINDING_RULES or finding.key not in committed_keys
+        ]
+        current.extend(
+            replace(finding, package_id=baseline.id)
+            for finding in baseline.findings
+            if finding.rule in EDITION_FINDING_RULES
+        )
     current.extend(decision_lifetime_findings(package, baseline, review=review))
     if not review:
         current = [finding for finding in current if finding.severity == "error"]
     return _sorted_findings(current)
+
+
+def check_workspace(
+    package: Package,
+    baseline: Package | None = None,
+    review: bool = False,
+) -> list[Finding]:
+    """Check current members independently together with workspace decisions."""
+
+    findings = list(check_package(package, baseline, review=review))
+    baseline_members = {
+        member.id: member for member in (baseline.workspace_members if baseline else [])
+    }
+    for member in package.workspace_members:
+        findings.extend(
+            check_package(
+                member,
+                baseline_members.get(member.id),
+                review=review,
+            )
+        )
+    return _sorted_findings(findings)
 
 
 _WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL"} | {

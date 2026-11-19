@@ -17,6 +17,7 @@ from quollcheck import (  # noqa: E402
     Package,
     check_package,
     decision_lifetime_findings,
+    dependent_site_evidence,
     load_package,
     prose_findings,
     public_reading,
@@ -52,12 +53,13 @@ class PackageFixtures:
         defaults: bool = True,
         root: Path | None = None,
         pid: str = PID,
+        edition: str = "0.6.0",
     ) -> Package:
         root = root or self.root
         dependency_text = ", ".join(f'"{dependency}"' for dependency in (dependencies or []))
         self.write(
             "package.quoll.toml",
-            f'id = "{pid}"\nedition = "0.4.0"\ndescription = "Demo."\ndependencies = [{dependency_text}]\n',
+            f'id = "{pid}"\nedition = "{edition}"\ndescription = "Demo."\ndependencies = [{dependency_text}]\n',
             root,
         )
         self.write("modules.quoll.toml", "modules = [" + ", ".join(f'"{module}"' for module in modules) + "]\n", root)
@@ -327,7 +329,6 @@ class ExposureCase(PackageFixtures, unittest.TestCase):
         reading,
         *dependencies: Package,
     ) -> tuple[Package, dict[str, Package]]:
-        roots = {package.id: package.root, **{dependency.id: dependency.root for dependency in dependencies}}
         package_ids = dict.fromkeys(
             [unit.package_id for unit in reading.units]
             + [module.package_id for module in reading.modules]
@@ -338,10 +339,7 @@ class ExposureCase(PackageFixtures, unittest.TestCase):
             self.extra_temporaries.append(temporary)
             units = [unit for unit in reading.units if unit.package_id == pid]
             files = {
-                unit.path: self.scoped_text(
-                    (roots[pid] / unit.path).read_text(encoding="utf-8"),
-                    unit.exposures,
-                )
+                unit.path: self.scoped_text(unit.text, unit.exposures)
                 for unit in units
             }
             modules = tuple(
@@ -357,6 +355,7 @@ class ExposureCase(PackageFixtures, unittest.TestCase):
                 defaults=False,
                 root=Path(temporary.name),
                 pid=pid,
+                edition=units[0].edition if units else "0.6.0",
             )
         return rebuilt[package.id], rebuilt
 
@@ -1116,6 +1115,40 @@ class ExposureCase(PackageFixtures, unittest.TestCase):
         self.assertEqual([], [str(finding) for finding in self.findings(package)])
 
 
+    def test_public_reading_preserves_each_front_and_rebuilds_without_author_roots(self) -> None:
+        fronts = {
+            "omitted": "",
+            "empty": "+++\nprelude = []\n[use]\n\"helper\" = [\"uses\"]\n+++\n",
+            "selective": "+++\nprelude = [\"module\"]\n+++\n",
+            "use": "+++\nprelude = []\n[use]\n\"helper\" = [\"run\"]\n+++\n",
+        }
+        statements = {
+            "omitted": "[uses]",
+            "empty": "[uses]",
+            "selective": "[module] and [helper.uses]",
+            "use": "[run]",
+        }
+        for mode, front in fronts.items():
+            with self.subTest(mode=mode):
+                package = self.make({
+                    "demo.h.md": '+++\n[exposes]\napi = "api"\nhelper = "helper.default"\n+++\nRoot.\n',
+                    "api.h.md": front + f"Public {statements[mode]}.\n## Structure\n```\n  open    contract\n```\n",
+                    "helper/helper.h.md": "## Structure\n```\n  run    target\n  uses   package-owned target\n```\n",
+                }, modules=("helper",))
+                self.assertEqual([], [str(finding) for finding in self.findings(package)])
+                reading = public_reading(package)
+                for unit in reading.units:
+                    self.assertEqual("0.6.0", unit.edition)
+                    self.assertEqual((package.root / unit.path).read_text(encoding="utf-8"), unit.text)
+                api_unit = next(unit for unit in reading.units if unit.path == "api.h.md")
+                self.assertEqual(front, api_unit.text[: len(front)])
+                self.assert_reading_rebuilds(package, reading)
+
+        self.make({"demo.h.md": "Old public input.\n"}, modules=(), edition="0.5.0")
+        with self.assertRaisesRegex(ValueError, "0.6.0"):
+            public_reading(load_package(self.root))
+
+
 class RelationCase(PackageFixtures, unittest.TestCase):
     def test_inclusion_cycle(self) -> None:
         package = self.make(
@@ -1580,6 +1613,7 @@ class AliasCase(PackageFixtures, unittest.TestCase):
             {
                 "demo.body.md": """\
                     +++
+                    prelude = []
                     [aliases]
                     model_alias = "model"
                     kernel = "model.kernel"
@@ -1590,6 +1624,7 @@ class AliasCase(PackageFixtures, unittest.TestCase):
                     """,
                 "demo.decisions.md": """\
                     +++
+                    prelude = []
                     [aliases]
                     uses = "model.kernel.uses"
                     +++
@@ -1700,7 +1735,7 @@ class AliasCase(PackageFixtures, unittest.TestCase):
     def workspace(self, decisions: str) -> Package:
         self.write(
             "workspace.quoll.toml",
-            'packages = ["member"]\ndescription = "Workspace."\n',
+            'packages = ["member"]\nedition = "0.6.0"\ndescription = "Workspace."\n',
         )
         self.write("workspace.decisions.md", decisions)
         self.make(
@@ -1760,7 +1795,7 @@ class AliasCase(PackageFixtures, unittest.TestCase):
     def test_workspace_interface_alias_keeps_member_public_bounds(self) -> None:
         self.write(
             "workspace.quoll.toml",
-            'packages = ["member"]\ndescription = "Workspace."\n',
+            'packages = ["member"]\nedition = "0.6.0"\ndescription = "Workspace."\n',
         )
         self.write(
             "workspace.decisions.md",
@@ -1796,7 +1831,7 @@ class AliasCase(PackageFixtures, unittest.TestCase):
     def test_workspace_discovery_prunes_only_declared_member_roots(self) -> None:
         self.write(
             "workspace.quoll.toml",
-            'packages = ["packages/member"]\ndescription = "Workspace."\n',
+            'packages = ["packages/member"]\nedition = "0.6.0"\ndescription = "Workspace."\n',
         )
         self.make(
             {"member.h.md": "Member.\n"},
@@ -1820,7 +1855,7 @@ class AliasCase(PackageFixtures, unittest.TestCase):
         baseline_root = self.root / "baseline"
         self.write(
             "workspace.quoll.toml",
-            'packages = ["member"]\ndescription = "Workspace."\n',
+            'packages = ["member"]\nedition = "0.6.0"\ndescription = "Workspace."\n',
             current_root,
         )
         self.make(
@@ -1843,6 +1878,473 @@ class AliasCase(PackageFixtures, unittest.TestCase):
         self.assertEqual(["other/other.h.md"], current_places)
         self.assertEqual(current_places, baseline_places)
         self.assertNotIn("member/member.h.md", current_places + baseline_places)
+
+
+class EditionPreludeCase(PackageFixtures, unittest.TestCase):
+    def test_default_empty_selective_inflection_and_capitalization(self) -> None:
+        package = self.make({
+            "mod/mod.h.md": """\
+                +++
+                [aliases]
+                m = "module"
+                +++
+                Edition [module], inflected [module]s, and explicit [m].
+                ## Structure
+                ```
+                  module    package-owned but reserved by the included prelude
+                ```
+                """,
+        })
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+        evidence = dependent_site_evidence(package)
+        self.assertTrue(evidence.complete, evidence.limits)
+        module_targets = {site.target for site in evidence.sites if site.reference == "module"}
+        self.assertEqual({"edition:0.6.0:model.kernel.module"}, module_targets)
+        self.assertEqual(
+            {"edition:0.6.0:model.kernel.module"},
+            {site.target for site in evidence.sites if site.reference == "m"},
+        )
+
+        package = self.make({
+            "mod/mod.h.md": """\
+                +++
+                prelude = ["uses"]
+                +++
+                Local [module], edition [uses], and a [module](https://example.com) link.
+                ## Structure
+                ```
+                  module    package-owned meaning
+                ```
+                """,
+        })
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+        evidence = dependent_site_evidence(package)
+        self.assertTrue(any(
+            site.reference == "module" and site.target.endswith(":mod:mod:module")
+            for site in evidence.sites
+        ))
+        self.assertIn("edition:0.6.0:model.kernel.uses", {site.target for site in evidence.sites})
+
+        package = self.make({
+            "mod/mod.h.md": """\
+                +++
+                prelude = []
+                +++
+                Both [module] and [uses] are package-owned; `[module]` and [module](https://example.com) are literal or links.
+                ## Structure
+                ```
+                  module    local
+                  uses      local
+                ```
+                """,
+        })
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+        package = self.make({"mod/mod.h.md": "Capitalized [Module] is not an edition alias.\n"})
+        self.assert_rule(self.findings(package), "semantic.resolved", 1)
+
+    def test_prelude_stated_by_needs_no_language_dependency(self) -> None:
+        package = self.make({
+            "mod/mod.decisions.md": "**D-1. Edition item**\n*Stated by* [module].\n",
+        })
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+
+    def test_unknown_duplicate_and_malformed_prelude_fail(self) -> None:
+        cases = (
+            ('prelude = true\n', "front.type"),
+            ('prelude = "uses"\n', "front.type"),
+            ('prelude = [1]\n', "front.type"),
+            ('prelude = ["unknown"]\n', "front.prelude"),
+            ('prelude = ["uses", "uses"]\n', "front.prelude"),
+        )
+        for declaration, rule in cases:
+            with self.subTest(declaration=declaration):
+                package = self.make({"mod/mod.h.md": f"+++\n{declaration}+++\nModule.\n"})
+                self.assert_rule(package.findings, rule, 1)
+
+    def test_same_and_distinct_target_collisions_and_excluded_rename(self) -> None:
+        declarations = (
+            '[aliases]\nuses = "model.kernel.uses"\n',
+            '[aliases]\nuses = "default.local"\n',
+            '[use]\n"model.kernel" = ["uses"]\n',
+        )
+        for declaration in declarations:
+            with self.subTest(declaration=declaration):
+                package = self.make({
+                    "mod/mod.h.md": f"+++\n{declaration}+++\nModule.\n## Structure\n```\n  local    target\n```\n",
+                    "model/model.h.md": "Model.\n",
+                    "model/kernel.h.md": "## Structure\n```\n  uses    relation\n```\n",
+                }, modules=("mod", "model"))
+                self.assert_rule(self.findings(package), "semantic.alias-unique", 1)
+
+        package = self.make({
+            "mod/mod.h.md": '+++\nprelude = []\n[aliases]\nuses = "model.kernel.uses"\n+++\nRenamed [uses].\n',
+            "model/model.h.md": "Model.\n",
+            "model/kernel.h.md": "## Structure\n```\n  uses    relation\n```\n",
+        }, modules=("mod", "model"))
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+
+    def test_non_language_lookalikes_never_capture_prelude_targets(self) -> None:
+        package = self.make({
+            "model/model.h.md": "Consumer-owned model module.\n",
+            "model/kernel.h.md": "## Structure\n```\n  module    consumer lookalike\n```\n",
+            "model/graph.h.md": "## Structure\n```\n  package    consumer lookalike\n```\n",
+            "other/other.h.md": "Fixed [module] and [package] references.\n",
+        }, modules=("model", "other"))
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+        evidence = dependent_site_evidence(package)
+        self.assertEqual(
+            {"edition:0.6.0:model.kernel.module", "edition:0.6.0:model.graph.package"},
+            {site.target for site in evidence.sites if site.path == "other/other.h.md"},
+        )
+
+    def test_edition_references_add_no_public_or_uses_edge_but_keep_definition_cycles(self) -> None:
+        package = self.make({
+            "language.h.md": '+++\n[exposes]\nother = "other.default"\n+++\nRoot.\n',
+            "language.body.md": """\
+                ## Rules
+                ```
+                  other alone    [module] providing [other.default] [uses] no [interface]
+                ```
+                """,
+            "model/model.h.md": "Model.\n",
+            "model/kernel.h.md": "## Structure\n```\n  module    edition item\n  uses      relation\n  interface contract\n```\n",
+            "other/other.h.md": "## Structure\n```\n  open    [module]\n```\n",
+        }, modules=("model", "other"), pid="pkg:quoll/rete-labs.ru/quoll/language")
+        findings = self.findings(package)
+        self.assertNotIn("semantic.public-closure", {finding.rule for finding in findings})
+        self.assertNotIn("semantic.uses", {finding.rule for finding in findings})
+        self.assertNotIn("model/kernel.h.md", public_reading(package).paths)
+
+        package = self.make({
+            "model/model.h.md": "Model.\n",
+            "model/kernel.h.md": "## Structure\n```\n  module    [other.open]\n```\n",
+            "other/other.h.md": "## Structure\n```\n  open    [module]\n```\n",
+        }, modules=("model", "other"), pid="pkg:quoll/rete-labs.ru/quoll/language")
+        self.assert_rule(self.findings(package), "semantic.definition-cycle", 2)
+
+    def test_old_current_and_baseline_editions_are_rejected_without_old_semantics(self) -> None:
+        self.make({
+            "model/model.h.md": "Model.\n",
+            "model/kernel.h.md": "## Structure\n```\n  module    item\n  decision  item\n```\n",
+            "model/model.decisions.md": "**D-1. Old spelling**\n*Stated by* module and decision.\n",
+        }, modules=("model",), edition="0.5.0")
+        baseline = load_package(self.root, baseline=True)
+        self.assert_rule(baseline.findings, "manifest.edition", 1)
+        self.assertEqual([], baseline.files)
+        current = load_package(self.root)
+        self.assert_rule(current.findings, "manifest.edition", 1)
+        self.assertEqual([], current.files)
+    def test_unavailable_dependency_sites_relations_and_exposures_limit_evidence(self) -> None:
+        package = self.make({
+            "demo.h.md": '+++\n[exposes]\nselected = "external.api"\n+++\nRoot.\n',
+            "mod/mod.h.md": '+++\nincludes = ["external.api"]\n+++\nA [external.api.run].\n',
+        }, dependencies=["pkg:quoll/example.com/external@v1.0.0"])
+        evidence = dependent_site_evidence(package)
+        self.assertFalse(evidence.complete)
+        limits = "\n".join(evidence.limits)
+        self.assertIn("unavailable dependency surface", limits)
+        self.assertIn("mod/mod.h.md:external.api.run", limits)
+        self.assertIn("includes", limits)
+        self.assertIn("exposes", limits)
+
+    def test_malformed_front_binding_limits_evidence_without_a_reference(self) -> None:
+        package = self.make({
+            "mod/mod.h.md": '+++\n[use]\n"mod.api" = ["run"\n+++\nModule.\n',
+        })
+        self.assertIn("front.toml", {finding.rule for finding in package.findings})
+        evidence = dependent_site_evidence(package)
+        self.assertFalse(evidence.complete)
+        self.assertIn("malformed or absent front bindings", "\n".join(evidence.limits))
+
+
+class UseAliasCase(PackageFixtures, unittest.TestCase):
+    def test_derived_names_and_every_relation_consumer(self) -> None:
+        package = self.make({
+            "mod/mod.h.md": "Module.\n",
+            "mod/api.h.md": """\
+                ## Structure
+                ```
+                  run              contract
+                  public surface   contract
+                  Capitalized      contract
+                ```
+                """,
+            "consumer/consumer.h.md": """\
+                +++
+                includes = ["api"]
+                [use]
+                "mod" = ["api"]
+                [exposes]
+                selected = "api"
+                +++
+                Included [api.run].
+                """,
+            "inspect/inspect.h.md": """\
+                +++
+                [use]
+                "mod.api" = ["run", "public surface", "Capitalized"]
+                +++
+                Prose [run], [public surface], and [Capitalized].
+                """,
+            "consumer/consumer.body.md": """\
+                +++
+                implements = ["api"]
+                [use]
+                "mod" = ["api"]
+                +++
+                ## Flow
+                ```
+                  impl [api]:
+                    run    implementation
+                ```
+                """,
+            "decide/decide.h.md": "Decision module.\n",
+            "decide/decide.decisions.md": """\
+                +++
+                [use]
+                "mod.api" = ["run"]
+                +++
+                **C-1. Derived decision reference**
+                *Stated by* [run]
+                """,
+        }, modules=("mod", "consumer", "decide", "inspect"))
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+        evidence = dependent_site_evidence(package)
+        self.assertTrue(
+            {"includes", "implements", "impl", "exposes", "decision"}
+            <= {site.context for site in evidence.sites}
+        )
+
+    def test_alias_resolved_prefix_no_prefix_alias_and_terminal_rejection(self) -> None:
+        package = self.make({
+            "mod/mod.h.md": "Module.\n",
+            "mod/api.h.md": "## Structure\n```\n  run    contract\n```\n",
+            "consumer/consumer.h.md": """\
+                +++
+                [aliases]
+                m = "mod"
+                bad = "run.more"
+                [use]
+                "m.api" = ["run"]
+                +++
+                Derived [run], missing prefix alias [api], and invalid [run.more].
+                """,
+        }, modules=("mod", "consumer"))
+        findings = self.findings(package)
+        self.assert_rule(findings, "semantic.resolved", 1)
+        self.assert_rule(findings, "semantic.reference-form", 1)
+        self.assert_rule(findings, "semantic.alias-target", 1)
+
+    def test_malformed_empty_and_duplicate_use_declarations_fail(self) -> None:
+        cases = (
+            ('use = "mod.api"\n', "front.type"),
+            ('[use]\nmod.api = ["run"]\n', "front.type"),
+            ('[use]\n"" = ["run"]\n', "front.use"),
+            ('[use]\n"mod.api" = [""]\n', "front.use"),
+            ('[use]\n"mod.api" = ["pkg:quoll/example.com/x"]\n', "front.use"),
+            ('[use]\n"mod.api" = ["run", "run"]\n', "front.use"),
+        )
+        for declaration, rule in cases:
+            with self.subTest(declaration=declaration):
+                package = self.make({"mod/mod.h.md": f"+++\n{declaration}+++\nModule.\n"})
+                self.assert_rule(package.findings, rule, 1)
+
+    def test_cross_group_and_rename_collisions_are_order_independent(self) -> None:
+        declarations = (
+            '[use]\n"mod.api" = ["run", "other.run"]\n',
+            '[aliases]\nrun = "mod.api.run"\n[use]\n"mod.api" = ["run"]\n',
+            '[use]\n"mod.api" = ["run"]\n[aliases]\nrun = "mod.api.run"\n',
+        )
+        for declaration in declarations:
+            with self.subTest(declaration=declaration):
+                package = self.make({
+                    "mod/mod.h.md": "Module.\n",
+                    "mod/api.h.md": "## Structure\n```\n  run    contract\n```\n",
+                    "mod/other.h.md": "## Structure\n```\n  run    contract\n```\n",
+                    "consumer/consumer.h.md": f"+++\n{declaration}+++\nConsumer.\n",
+                }, modules=("mod", "consumer"))
+                self.assert_rule(self.findings(package), "semantic.alias-unique", 1)
+
+    def test_use_cycles_and_sight_are_not_exempted(self) -> None:
+        package = self.make({
+            "mod/mod.h.md": """\
+                +++
+                [aliases]
+                a = "run"
+                [use]
+                "a" = ["run"]
+                +++
+                Module.
+                """,
+        })
+        self.assert_rule(self.findings(package), "semantic.alias-cycle", 2)
+        package = self.make({
+            "a/secret.private.h.md": "## Structure\n```\n  hidden    private\n```\n",
+            "b/b.h.md": '+++\n[use]\n"a.secret" = ["hidden"]\n+++\nB.\n',
+        }, modules=("a", "b"))
+        self.assert_rule(self.findings(package), "semantic.alias-target", 1)
+
+
+    def test_grouped_use_is_current_and_old_baselines_are_rejected(self) -> None:
+        files = {
+            "mod/mod.h.md": "Module.\n",
+            "mod/api.h.md": "## Structure\n```\n  run    contract\n```\n",
+            "consumer/consumer.h.md": '+++\n[use]\n"mod.api" = ["run"]\n+++\nCurrent [run].\n',
+        }
+        current = self.make(files, modules=("mod", "consumer"))
+        self.assertEqual([], [str(finding) for finding in self.findings(current)])
+
+        temporary = tempfile.TemporaryDirectory()
+        self.extra_temporaries.append(temporary)
+        self.make(
+            files,
+            modules=("mod", "consumer"),
+            root=Path(temporary.name),
+            edition="0.5.0",
+        )
+        baseline = load_package(temporary.name, baseline=True)
+        self.assert_rule(baseline.findings, "manifest.edition", 1)
+        self.assertEqual([], baseline.files)
+
+    def test_workspace_use_and_resolved_dependent_site_evidence(self) -> None:
+        self.write(
+            "workspace.quoll.toml",
+            'packages = ["member"]\nedition = "0.6.0"\ndescription = "Workspace."\n',
+        )
+        self.write(
+            "workspace.decisions.md",
+            '+++\n[use]\n"member.api" = ["run"]\n+++\n**W-1. Derived member reference**\n*Because* [run] and [module] resolve publicly.\n',
+        )
+        self.make({
+            "member.h.md": '+++\n[exposes]\napi = "api"\n+++\nMember.\n',
+            "api.h.md": "## Structure\n```\n  run    public\n```\n",
+        }, modules=(), root=self.root / "member", pid="pkg:quoll/example.com/member")
+        workspace = load_package(self.root)
+        self.assertEqual([], [str(finding) for finding in self.findings(workspace)])
+        evidence = dependent_site_evidence(workspace)
+        site = next(
+            site
+            for site in evidence.sites
+            if site.path == "workspace.decisions.md" and site.reference == "run"
+        )
+        self.assertEqual("run", site.reference)
+        self.assertIn("pkg:quoll/example.com/member:item:", site.target)
+        self.assertIn(
+            "edition:0.6.0:model.kernel.module",
+            {site.target for site in evidence.sites if site.reference == "module"},
+        )
+
+        self.write(
+            "workspace.decisions.md",
+            '+++\nprelude = []\n+++\n**W-1. Disabled edition prelude**\n*Because* [member.api.run] stays ordinary while [module] has no local target.\n',
+        )
+        self.assert_rule(self.findings(load_package(self.root)), "semantic.resolved", 1)
+
+
+class WorkspacePreludeCase(PackageFixtures, unittest.TestCase):
+    def workspace(self, front: str, decision: str, *, member_edition: str = "0.6.0") -> Package:
+        self.write(
+            "workspace.quoll.toml",
+            'packages = ["member"]\nedition = "0.6.0"\ndescription = "Workspace."\n',
+        )
+        self.write("workspace.decisions.md", front + decision)
+        self.make({
+            "member.h.md": '+++\n[exposes]\ndefault = "default"\napi = "api"\n+++\nMember.\n',
+            "api.h.md": "## Structure\n```\n  run     public\n  module  public\n```\n",
+        }, modules=(), root=self.root / "member", pid="pkg:quoll/example.com/member", edition=member_edition)
+        return load_package(self.root)
+
+    def test_workspace_omitted_empty_and_selective_prelude(self) -> None:
+        package = self.workspace("", "**W-1. Omitted**\n*Because* [module] is fixed.\n")
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+        evidence = dependent_site_evidence(package)
+        self.assertIn(
+            "edition:0.6.0:model.kernel.module",
+            {site.target for site in evidence.sites if site.reference == "module"},
+        )
+
+        for selected in ([], ["uses"]):
+            with self.subTest(selected=selected):
+                front = (
+                    "+++\n"
+                    + "prelude = [" + ", ".join(f'\"{name}\"' for name in selected) + "]\n"
+                    + '[aliases]\nmodule = "member"\n+++\n'
+                )
+                package = self.workspace(front, "**W-1. Selected**\n*Because* [module.api.run] is public.\n")
+                self.assertEqual([], [str(finding) for finding in self.findings(package)])
+                if selected:
+                    self.write(
+                        "workspace.decisions.md",
+                        front + "**W-2. Fixed uses**\n*Because* [uses] is fixed.\n",
+                    )
+                    self.assertEqual([], [str(finding) for finding in self.findings(load_package(self.root))])
+
+    def test_workspace_prelude_collision_and_invalid_entries(self) -> None:
+        package = self.workspace(
+            '+++\n[aliases]\nmodule = "member"\n+++\n',
+            "**W-1. Reserved**\n*Because* The included spelling cannot be shadowed.\n",
+        )
+        self.assert_rule(self.findings(package), "semantic.alias-unique", 1)
+        package = self.workspace(
+            '+++\n[use]\n"member.api" = ["module"]\n+++\n',
+            "**W-1. Derived reserved**\n*Because* The derived spelling cannot shadow either.\n",
+        )
+        self.assert_rule(self.findings(package), "semantic.alias-unique", 1)
+
+        for declaration, rule in (
+            ('prelude = true\n', "front.type"),
+            ('prelude = ["unknown"]\n', "front.prelude"),
+            ('prelude = ["uses", "uses"]\n', "front.prelude"),
+        ):
+            with self.subTest(declaration=declaration):
+                package = self.workspace(f"+++\n{declaration}+++\n", "**W-1. Invalid**\n")
+                self.assert_rule(package.findings, rule, 1)
+
+    def test_member_edition_is_mandatory_and_not_inherited(self) -> None:
+        package = self.workspace("", "**W-1. Workspace edition**\n*Because* [module] is fixed.\n", member_edition="0.5.0")
+        self.assertEqual("0.6.0", package.edition)
+        self.assertEqual([], [str(finding) for finding in self.findings(package)])
+        member = package.workspace_members[0]
+        self.assert_rule(member.findings, "manifest.edition", 1)
+        self.assertEqual([], member.files)
+
+
+class RelatedWorkspaceCase(PackageFixtures, unittest.TestCase):
+    def write_ancestor(self, edition: str | None) -> Path:
+        ancestor = self.root / "ancestor"
+        edition_line = f'edition = "{edition}"\n' if edition is not None else ""
+        self.write(
+            "workspace.quoll.toml",
+            f'packages = ["member"]\n{edition_line}description = "Ancestor workspace."\n',
+            ancestor,
+        )
+        self.write(
+            "workspace.decisions.md",
+            "+++\nunknown = true\n+++\n**W-1. Front must not be parsed without authority.**\n",
+            ancestor,
+        )
+        return ancestor
+
+    def test_nonmember_ignores_invalid_ancestor_workspace_edition(self) -> None:
+        for edition in (None, "0.5.0"):
+            with self.subTest(edition=edition):
+                ancestor = self.write_ancestor(edition)
+                package = self.make(root=ancestor / "nonmember")
+                self.assertEqual("0.6.0", package.edition)
+                self.assertEqual([], package.related_decisions)
+                self.assertNotIn("workspace.edition", {finding.rule for finding in package.findings})
+                self.assertNotIn("front.keys", {finding.rule for finding in package.findings})
+                self.assertEqual([], [str(finding) for finding in self.findings(package)])
+
+    def test_member_requires_valid_ancestor_before_decision_front_parsing(self) -> None:
+        for edition in (None, "0.5.0"):
+            with self.subTest(edition=edition):
+                ancestor = self.write_ancestor(edition)
+                package = self.make(root=ancestor / "member")
+                self.assertEqual("0.6.0", package.edition)
+                self.assertEqual([], package.related_decisions)
+                self.assert_rule(package.findings, "workspace.edition", 1)
+                self.assertNotIn("front.keys", {finding.rule for finding in package.findings})
 
 
 class DecisionStatementCase(PackageFixtures, unittest.TestCase):
@@ -1880,7 +2382,7 @@ class DecisionStatementCase(PackageFixtures, unittest.TestCase):
                 })
                 self.assertEqual([], [str(finding) for finding in self.findings(package)])
 
-    def test_stated_by_accepts_exactly_the_six_bare_core_words(self) -> None:
+    def test_stated_by_accepts_exactly_the_seven_bracketed_prelude_items(self) -> None:
         package = self.make(
             {
                 "model/model.h.md": "Model.\n",
@@ -1891,8 +2393,8 @@ class DecisionStatementCase(PackageFixtures, unittest.TestCase):
                 ),
                 "model/graph.h.md": "## Structure\n```\n  workspace  one\n  package    one\n```\n",
                 "model/model.decisions.md": (
-                    "**D-1. Core words**\n"
-                    "*Stated by* workspace, package, module, interface, item and decision.\n"
+                    "**D-1. Prelude items**\n"
+                    "*Stated by* [workspace], [package], [module], [interface], [item], [decision] and [uses].\n"
                 ),
             },
             modules=("model",),
@@ -1907,7 +2409,7 @@ class DecisionStatementCase(PackageFixtures, unittest.TestCase):
         self.assert_rule(findings, "semantic.stated-by-form", 1)
         self.assertNotIn("semantic.stated-by-target", {finding.rule for finding in findings})
 
-    def test_bare_core_words_resolve_to_edition_items_across_modules(self) -> None:
+    def test_bracketed_prelude_items_resolve_to_edition_items_across_modules(self) -> None:
         package = self.make(
             {
                 "model/model.h.md": "Model.\n",
@@ -1915,10 +2417,11 @@ class DecisionStatementCase(PackageFixtures, unittest.TestCase):
                 "model/graph.h.md": "## Structure\n```\n  package  edition meaning\n```\n",
                 "other/other.h.md": "## Structure\n```\n  module  local lookalike\n  package  local lookalike\n```\n",
                 "other/other.decisions.md": (
-                    "**D-1. Edition items**\n*Stated by* package and module.\n"
+                    "**D-1. Edition items**\n*Stated by* [package] and [module].\n"
                 ),
             },
             modules=("model", "other"),
+            pid="pkg:quoll/rete-labs.ru/quoll/language",
         )
         self.assertEqual([], [str(finding) for finding in self.findings(package)])
         negative = next(
@@ -1928,15 +2431,14 @@ class DecisionStatementCase(PackageFixtures, unittest.TestCase):
         )
         self.assertIn("D-1", negative.detail)
 
-    def test_bare_core_word_still_requires_an_item_and_bare_multiword_is_rejected(self) -> None:
+    def test_bare_core_word_and_bare_multiword_are_rejected_in_stated_by(self) -> None:
         for stated_by in ("decision", "full interface"):
             with self.subTest(stated_by=stated_by):
                 package = self.make({
                     "mod/mod.decisions.md": f"**D-1. Required target**\n*Stated by* {stated_by}\n",
                 })
                 findings = self.findings(package)
-                rule = "semantic.stated-by-target" if stated_by == "decision" else "semantic.stated-by-form"
-                self.assert_rule(findings, rule, 1)
+                self.assert_rule(findings, "semantic.stated-by-form", 1)
 
     def test_every_stated_by_reference_lands_on_an_item(self) -> None:
         package = self.make({
@@ -2003,7 +2505,7 @@ class PointerStubLifetimeCase(PackageFixtures, unittest.TestCase):
         shutil.copytree(original.root, nested / "language")
         self.write(
             "workspace.quoll.toml",
-            'packages = ["mod"]\ndescription = "Not a member package root."\n',
+            'packages = ["mod"]\nedition = "0.6.0"\ndescription = "Not a member package root."\n',
             nested,
         )
         baseline = load_package(nested, baseline=True)
@@ -2123,7 +2625,7 @@ class PointerStubLifetimeCase(PackageFixtures, unittest.TestCase):
     def test_pointer_only_move_resolves_in_declared_parent_workspace(self) -> None:
         self.write(
             "workspace.quoll.toml",
-            'packages = ["member"]\ndescription = "Workspace."\n',
+            'packages = ["member"]\nedition = "0.6.0"\ndescription = "Workspace."\n',
         )
         self.write(
             "workspace.decisions.md",
@@ -2301,11 +2803,11 @@ class PointerStubLifetimeCase(PackageFixtures, unittest.TestCase):
 
 
 class ProseCase(PackageFixtures, unittest.TestCase):
-    def test_language_uses_exactly_the_six_core_words(self) -> None:
+    def test_language_reviews_all_seven_former_core_words_as_ordinary_bare_words(self) -> None:
         package = self.make(
             {
                 "language.h.md": (
-                    "Workspace package module interface item decision, while uses remains an item name.\n"
+                    "A workspace package module interface item decision uses.\n"
                     "## Structure\n```\n"
                     "  workspace    one\n  package      one\n  module       one\n"
                     "  interface    one\n  item         one\n  decision     one\n  uses         relation\n"
@@ -2320,12 +2822,16 @@ class ProseCase(PackageFixtures, unittest.TestCase):
             for finding in prose_findings(package, review=True)
             if finding.rule == "prose.bare-word"
         ]
-        self.assertEqual(["uses"], [finding.subject for finding in findings], [str(finding) for finding in findings])
+        self.assertEqual(
+            ["decision", "interface", "item", "module", "package", "uses", "workspace"],
+            [finding.subject for finding in findings],
+            [str(finding) for finding in findings],
+        )
 
     def test_workspace_decisions_scan_member_public_item_vocabulary(self) -> None:
         self.write(
             "workspace.quoll.toml",
-            'packages = ["member"]\ndescription = "Workspace."\n',
+            'packages = ["member"]\nedition = "0.6.0"\ndescription = "Workspace."\n',
         )
         self.write(
             "workspace.decisions.md",
@@ -2345,14 +2851,17 @@ class ProseCase(PackageFixtures, unittest.TestCase):
         words = [finding for finding in findings if finding.rule == "prose.bare-word"]
         self.assertEqual(["public surface"], [finding.subject for finding in compounds])
         self.assertEqual(["member.api.public surface"], [finding.detail.split("write [", 1)[1].split("]", 1)[0] for finding in compounds])
-        self.assertEqual(["run"], [finding.subject for finding in words])
-        self.assertEqual(["member.default.run"], [finding.detail.split("write [", 1)[1].split("]", 1)[0] for finding in words])
+        self.assertEqual(["module", "run"], [finding.subject for finding in words])
+        self.assertEqual(
+            ["member.default.module", "member.default.run"],
+            [finding.detail.split("write [", 1)[1].split("]", 1)[0] for finding in words],
+        )
         self.assertTrue(all(finding.path == "workspace.decisions.md" for finding in findings))
 
     def test_workspace_vocabulary_follows_nested_exposures_to_default_items(self) -> None:
         self.write(
             "workspace.quoll.toml",
-            'packages = ["member"]\ndescription = "Workspace."\n',
+            'packages = ["member"]\nedition = "0.6.0"\ndescription = "Workspace."\n',
         )
         self.write(
             "workspace.decisions.md",
