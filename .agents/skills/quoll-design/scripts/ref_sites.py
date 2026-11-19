@@ -1,6 +1,7 @@
 """List sites resting on items and decisions changed between two package copies.
 
-Usage: ref_sites.py OLD_DIR NEW_DIR. Both directories are v0.4 package states.
+Usage: ref_sites.py OLD_DIR NEW_DIR. Both directories are current 0.6.0 package
+states; OLD_DIR is the same-edition diff/lifetime baseline.
 References are matched textually, without sight or resolution checks.
 """
 
@@ -371,8 +372,8 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         description="List textual sites resting on changes between two package copies."
     )
-    result.add_argument("old", metavar="OLD_DIR", help="old v0.4 package copy")
-    result.add_argument("new", metavar="NEW_DIR", help="current v0.4 package copy")
+    result.add_argument("old", metavar="OLD_DIR", help="old same-0.6.0 package copy")
+    result.add_argument("new", metavar="NEW_DIR", help="current 0.6.0 package copy")
     return result
 
 
@@ -381,7 +382,7 @@ def main(argv: list[str] | None = None) -> int:
     if not Path(args.old).is_dir() or not Path(args.new).is_dir():
         parser().error("OLD_DIR and NEW_DIR must be package directories")
     try:
-        old = load_package(args.old)
+        old = load_package(args.old, baseline=True)
         new = load_package(args.new)
     except (OSError, ValueError) as error:
         print(f"ref_sites.py: {error}", file=sys.stderr)

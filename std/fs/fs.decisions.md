@@ -14,13 +14,13 @@
 *Stated by* [content], [read] and [write].
 *Because* complete bytes preserve text and non-text files alike without loss, alteration or an encoding choice that consumers have not specified.
 *Accepting* that consumers must obtain encoded bytes elsewhere before writing text.
-*Rejected* text alone, which cannot faithfully handle arbitrary files and imposes an encoding; and separate byte and text operations, which duplicate surface and require an encoding decision before a consumer does.
+*Rejected* text alone, which cannot faithfully handle arbitrary files and imposes an encoding; and separate byte and text operations, which duplicate surface and require an encoding [decision] before a consumer does.
 
 **FS-4. Return every operating-system and native-text conversion [failure] explicitly through [fs].**
 *Stated by* [failure] and [completion].
 *Because* callers can handle unsuccessful outcomes without knowing a target's exception or error mechanism, and no conversion is hidden by lossy replacement.
-*Accepting* that a reader must consult the Rules view as well as each Flow item for an action's unsuccessful outcome, and that [fs] defines its own [failure] notion.
-*Rejected* target-specific [failure] mechanisms outside this surface, which prevent portable handling; a generic result abstraction, which would introduce a general facility and another module without a present requirement; and repeating the [failure] alternative in every action, which duplicates one promise and invites drift.
+*Accepting* that a reader must consult the Rules view as well as each Flow [item] for an action's unsuccessful outcome, and that [fs] defines its own [failure] notion.
+*Rejected* target-specific [failure] mechanisms outside this surface, which prevent portable handling; a generic result abstraction, which would introduce a general facility and another [module] without a present requirement; and repeating the [failure] alternative in every action, which duplicates one promise and invites drift.
 
 **FS-5. Report symbolic links in listing, follow them for inspection, reading and writing, and [remove] links themselves.**
 *Stated by* [kind], [list], [inspect], [read], [write] and [remove].

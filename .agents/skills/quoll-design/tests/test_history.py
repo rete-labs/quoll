@@ -49,7 +49,7 @@ class PackageFixtures:
         self.write(
             root,
             "package.quoll.toml",
-            f'id = "{PID}"\nedition = "0.4.0"\ndescription = "Demo."\ndependencies = []\n',
+            f'id = "{PID}"\nedition = "0.6.0"\ndescription = "Demo."\ndependencies = []\n',
         )
         self.write(
             root,

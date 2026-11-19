@@ -1,3 +1,6 @@
++++
+prelude = []
++++
 **LAYOUT-1. Lay a [package] out as one directory, with the directories below its top, and say each canonical [source file]'s kind in its name.**
 *Stated by* [package], [manifest], [modules], [lock], [assembly], [header], [private header], [body], [decisions] and [source file].
 *Because* a name says what a [source file] is, as `.h` and `.c` do in C, so a person browsing a directory or a row of tabs sees each one's kind without opening it.

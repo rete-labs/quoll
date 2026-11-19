@@ -1,3 +1,6 @@
++++
+prelude = []
++++
 How a [package] lies on disk, for whoever writes one and for any tool that reads one: its portable [path]s and [workspace], the canonical Quoll source profile's [source file]s and their kinds as [kind by name] tells them, the source-side [assembly] and common [target map] boundaries, and that profile's [content hash].
 
 ## Structure

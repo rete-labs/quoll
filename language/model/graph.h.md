@@ -19,20 +19,20 @@ Publication and trust over the [kernel.structural kernel]: heterogeneous [packag
                           surface, the public paths reachable from that root, which alone cross its
                           bounds; the [package] extends that same [kernel.module tree] with
                           publication, versioning, trust and dependency semantics, creating no
-                          second tree, design history or decision ID space; a [package] never stands
-                          within another [package]; and an interface none of its modules implements
-                          is abstract by that alone
-  exposure                an explicit alias declared by an existing module, mapping a name or path
-                          it exposes to a whole interface within its [kernel.sight], never to a
-                          module or an individual item: every item of the exposed interface, one
-                          included whole among them, is publicly readable through it; the alias
-                          identifies the same interface rather than copying it or creating a header,
-                          module or item, and leaves its [kernel.structural path] unchanged and
-                          private by default; an intermediate [exposure] may re-export a deeper
-                          interface to its parent, becoming externally public only where a chain of
-                          [exposure]s reaches the [package] root; one interface may have several
-                          [exposure] paths, while every declared [exposure] path, public or
-                          intermediate, identifies exactly one target
+                          second tree, design history or [decision] ID space; a [package] never
+                          stands within another [package]; and an [interface] none of its [module]s
+                          implements is abstract by that alone
+  exposure                an explicit alias declared by an existing [module], mapping a name or path
+                          it exposes to a whole [interface] within its [kernel.sight], never to a
+                          [module] or an individual [item]: every [item] of the exposed [interface],
+                          one included whole among them, is publicly readable through it; the alias
+                          identifies the same [interface] rather than copying it or creating a
+                          header, [module] or [item], and leaves its [kernel.structural path]
+                          unchanged and private by default; an intermediate [exposure] may re-export
+                          a deeper [interface] to its parent, becoming externally public only where
+                          a chain of [exposure]s reaches the [package] root; one [interface] may
+                          have several [exposure] paths, while every declared [exposure] path,
+                          public or intermediate, identifies exactly one target
 
   version                 a [package]'s, under which it is published and others depend on it: with
                           its [package id], what tells it, as published, from every other state of
@@ -75,10 +75,12 @@ Publication and trust over the [kernel.structural kernel]: heterogeneous [packag
 
   workspace               the unnamed unit of maintenance and publication coordination: [package]s
                           kept at head together, each independently readable and fetchable; it
-                          coordinates publication of its members rather than publishing itself, and
-                          holds decisions over workspace-level membership and coordinated
-                          publication choices, which may name member [package]s as wholes and their
-                          public surfaces and bind those choices alone
+                          coordinates publication of its members rather than publishing itself,
+                          names an [edition] for its own canonical Quoll [layout.source file]s while
+                          each member independently names its own and inherits none from the
+                          [workspace], and holds [decision]s over workspace-level membership and
+                          coordinated publication choices, which may name member [package]s as
+                          wholes and their public surfaces and bind those choices alone
   dependency              another [package] that a [package] depends on, declared by a [selector] in
                           the ecosystem metadata that remains authoritative for it; a native
                           manifest owns native requirements and no overlay duplicates them; the
@@ -145,28 +147,28 @@ Publication and trust over the [kernel.structural kernel]: heterogeneous [packag
                           cross-ecosystem selection fails explicitly
 
   edition                 the language's definition at one [version], itself a [package], which a
-                          [package] names as the one it is written in, fixing what the language's
-                          terms mean in it; the definition is written in the [edition] that is its
-                          own [version]
+                          [package] names as the one its canonical Quoll source is written in,
+                          fixing what the language's terms mean in that source; the definition is
+                          written in the [edition] that is its own [version]
   role                    what a [package] is to the [package]s around it: a library, a [package]
-                          others depend on; a framework, a library whose abstract interfaces its
+                          others depend on; a framework, a library whose abstract [interface]s its
                           users implement, and which owns the flow that calls them; and a system, a
                           [package] no other depends on
-  package sight           the [kernel.sight] of a module in a [package], adding the surface of each
-                          [dependency] and, as wholes, each module or [package] providing something
-                          visible; no [workspace] decision enters it
+  package sight           the [kernel.sight] of a [module] in a [package], adding the surface of
+                          each [dependency] and, as wholes, each [module] or [package] providing
+                          something visible; no [workspace] [decision] enters it
   public reference        a [kernel.reference] using a [package]-qualified public path, within the
                           same [package] or crossing its bound, or standing in a [workspace]
-                          decision: it names a [package] by its canonical [package id] and lands
-                          only on it as a whole or on an interface exposed from its root, or an item
-                          of one, through that public path, never on a private
+                          [decision]: it names a [package] by its canonical [package id] and lands
+                          only on it as a whole or on an [interface] exposed from its root, or an
+                          [item] of one, through that public path, never on a private
                           [kernel.structural path]; its complete public spelling has one target for
                           every reader and is distinct from a local structural reference, not that
                           reference with a removable [package] prefix; a published address includes
                           the exact [version] or immutable resolved state, readable local aliases
                           may shorten its source spelling, and [workspace] members at head may
                           update their references atomically; an upgrade revisits renamed or changed
-                          targets, with no universal item IDs and no inferred logical identity
+                          targets, with no universal [item] IDs and no inferred logical identity
                           across independent renames; a native structured comment, documentation or
                           annotation may carry such a [kernel.reference] only where its
                           [kernel.semantic profile] declares the form and its adapter resolves it
@@ -178,8 +180,8 @@ Publication and trust over the [kernel.structural kernel]: heterogeneous [packag
   native overlay          the presence of `package.quoll.toml` on a native [package], marking it as
                           quollified and discoverable for common-graph participation; it carries the
                           native [package id], [kernel.semantic profile] identity and version,
-                          [edition], references to any co-located canonical Quoll items and
-                          structured decisions, and [kernel.provenance] where the [package] is a
+                          [edition], references to any co-located canonical Quoll [item]s and
+                          structured [decision]s, and [kernel.provenance] where the [package] is a
                           [kernel.target]; the native manifest remains authoritative for native
                           name, [version], requirements, [resolution] and [lock], and the overlay
                           declares only cross-profile facts the native ecosystem cannot carry,
@@ -222,28 +224,32 @@ Publication and trust over the [kernel.structural kernel]: heterogeneous [packag
                           on its originating [workspace], an inherited [version], a workspace-local
                           path or a publication transformation; at-head substitution is explicit and
                           changes no fetched [package]'s declarations or meaning
-    public closure        every [kernel.reference] in a root-reachable [exposure]'s contract or a
-                          supplied declaration [kernel.unit], including one brought in directly by
-                          interface inclusion, lands on an item of a root-reachable exposed
-                          interface of the same [package] or on a [dependency]'s public surface; no
-                          same-unit-private or declaration-only exception admits another target;
-                          closure follows [exposure]s and the [kernel.reference]s of exposed
-                          contracts recursively, while inclusion alone creates no public alias and
-                          no private target is exposed implicitly; [kernel.sight] governs what its
-                          author may write, while this closure governs what a dependent can resolve,
-                          and is checked from the [kernel.reference]s and public surface alone
+    public closure        every ordinary [kernel.reference] in a root-reachable [exposure]'s
+                          contract or a supplied declaration [kernel.unit], including one brought in
+                          directly by [interface] inclusion, lands on an [item] of a root-reachable
+                          exposed [interface] of the same [package] or on a [dependency]'s public
+                          surface; a reference resolved by the named [edition]'s fixed spelling
+                          authority instead lands on that authority's target and adds no ordinary
+                          dependency, sight, exposure, [kernel.uses] or closure edge; no
+                          same-unit-private or declaration-only exception admits another ordinary
+                          target; closure follows [exposure]s and the ordinary [kernel.reference]s
+                          of exposed contracts recursively, while inclusion alone creates no public
+                          alias and no private target is exposed implicitly; [kernel.sight] governs
+                          what its author may write, while this closure governs what a dependent can
+                          resolve, and is checked from the [kernel.reference]s, named [edition],
+                          public surface and each unit's own representation declarations alone
     package names         no declared [exposure] path, public or intermediate, identifies two
                           targets, though one target may have several [exposure] paths; every legal
-                          continuation of an [exposure] path to an item of its exposed interface,
-                          including an item of a [kernel.default interface] under every legal alias,
-                          identifies exactly one item; a named interface and a sibling module may
-                          not share a name, and no facade or module-first precedence resolves a
-                          collision; a [dependency]'s local names are unique wherever they resolve
-                          without an explicit alias
+                          continuation of an [exposure] path to an [item] of its exposed
+                          [interface], including an [item] of a [kernel.default interface] under
+                          every legal alias, identifies exactly one [item]; a named [interface] and
+                          a sibling [module] may not share a name, and no facade or module-first
+                          precedence resolves a collision; a [dependency]'s local names are unique
+                          wherever they resolve without an explicit alias
 
     dependency alone      a [dependency] makes a surface visible and never itself claims
                           implementing, generated-from, binding, tracing, conformance or
-                          [kernel.provenance]; the realizing side names the versioned interface it
+                          [kernel.provenance]; the realizing side names the versioned [interface] it
                           implements, the specification does not enumerate its realizations, a
                           design-time Quoll contract [dependency] supplies no runtime native
                           artifact, and no relation itself establishes that the implementation keeps
@@ -254,6 +260,6 @@ Publication and trust over the [kernel.structural kernel]: heterogeneous [packag
                           and fails where no reproducible cross-ecosystem selection is available
 
     decision separation   an external [kernel.source] [package] and its derived [kernel.target]
-                          [package] keep their own decisions in their own [package]s, the
+                          [package] keep their own [decision]s in their own [package]s, the
                           [kernel.target]'s canonical only for choices delegated to it
 ```

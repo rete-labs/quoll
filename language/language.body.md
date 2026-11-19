@@ -1,15 +1,11 @@
-+++
-[aliases]
-uses = "model.kernel.uses"
-+++
 ## Rules
 
 ```
   ensures:
-    own surface          the root's [model.kernel.default interface] includes no part's interface
+    own surface          the root's [model.kernel.default interface] includes no part's [interface]
 
-    layout alone         [layout] [uses] no interface
-    model alone          [model] [uses] no interface
+    layout alone         [layout] [uses] no [interface]
+    model alone          [model] [uses] no [interface]
 
     grammar on layout    [grammar] [uses] [layout.default] alone
 

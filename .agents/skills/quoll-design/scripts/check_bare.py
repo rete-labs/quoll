@@ -16,8 +16,8 @@ def main(argv: list[str] | None = None) -> int:
         description="Print bare compound findings; add --review for bare words.",
         epilog=EPILOG,
     )
-    parser.add_argument("current", metavar="CURRENT", help="current v0.4 package directory")
-    parser.add_argument("--base", metavar="BASELINE", help="committed package baseline")
+    parser.add_argument("current", metavar="CURRENT", help="current 0.6.0 package directory")
+    parser.add_argument("--base", metavar="BASELINE", help="same-0.6.0 diff/lifetime package baseline")
     parser.add_argument("--review", action="store_true", help="also print bare-word reviews")
     args = parser.parse_args(argv)
     try:
